@@ -46,3 +46,9 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+
+*.mid
+*.midi
+**/*.mid
+**/*.midi

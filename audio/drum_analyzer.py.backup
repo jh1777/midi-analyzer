@@ -88,15 +88,11 @@ class DrumAnalyzer:
                     beat_pos = hit['beat_position']
                     time_sec = hit['time_seconds']
                     
-                    # Find position within the grid (modulo operation)
-                    # This handles cases where drums start late in the file
-                    pos_in_grid = beat_pos % grid_size
+                    # Find nearest grid position
+                    nearest_grid = round(beat_pos / grid_size) * grid_size
                     
-                    # Find nearest grid point (either 0 or grid_size)
-                    if pos_in_grid <= grid_size / 2:
-                        error_beats = pos_in_grid  # Early, should be at 0
-                    else:
-                        error_beats = pos_in_grid - grid_size  # Late, should be at next grid
+                    # Calculate timing error in beats
+                    error_beats = beat_pos - nearest_grid
                     
                     # Convert to milliseconds using tempo
                     # 1 beat = 60/BPM seconds
@@ -154,15 +150,8 @@ class DrumAnalyzer:
                 tendency = 'Centered'
             
             # Grid name
-            grid_names = {
-                1/8: '32nd notes',
-                1/6: '16th triplets',
-                0.25: '16th notes',
-                1/3: '8th triplets',
-                0.5: '8th notes',
-                1.0: 'quarter notes'
-            }
-            grid_name = grid_names.get(best_grid_size, f'{best_grid_size:.4f} beats')
+            grid_names = {0.25: '16th notes', 0.5: '8th notes', 1.0: 'quarter notes'}
+            grid_name = grid_names.get(best_grid_size, f'{best_grid_size} beats')
             
             quality_metrics[drum] = {
                 'hit_count': len(hits),
