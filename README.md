@@ -114,6 +114,13 @@ python -m audio <midi_file.mid>
 ```
 Full timing analysis with scores per drum type.
 
+**Filter by specific drum:**
+```bash
+python -m audio <midi_file.mid> --details "Acoustic Snare"
+python -m audio <midi_file.mid> --details "Bass Drum 1"
+```
+Shows detailed analysis for only one drum (useful for focused practice).
+
 ### Quantization Advisor
 ```bash
 python suggest_quantize.py <midi_file.mid>

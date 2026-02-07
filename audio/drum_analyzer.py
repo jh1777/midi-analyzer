@@ -275,30 +275,54 @@ class DrumAnalyzer:
             'timing_quality': timing_quality
         }
     
-    def print_summary(self, analysis: Dict):
-        """Print a summary of the analysis."""
+    def print_summary(self, analysis: Dict, filter_drum: str = None):
+        """Print a summary of the analysis.
+        
+        Args:
+            analysis: Analysis data dictionary
+            filter_drum: Optional drum name to filter output (e.g., "Acoustic Snare")
+        """
         print(f"\n{'='*60}")
         print(f"MIDI Drum Analysis: {analysis['file']}")
         print(f"{'='*60}")
         print(f"Duration: {analysis['duration_seconds']}s")
         print(f"Tempo: {analysis['tempo_bpm']} BPM")
-        print(f"Total Drum Hits: {analysis['total_beats']}")
-        print(f"\n{'Drum Breakdown:':-^60}")
         
-        for drum, count in sorted(
-            analysis['drum_counts'].items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        ):
-            print(f"  {drum:<25} {count:>5} hits")
+        if filter_drum:
+            print(f"Filter: {filter_drum}")
+            filtered_hits = sum(1 for b in analysis['beats'] if b['drum'] == filter_drum)
+            print(f"Total Drum Hits: {filtered_hits}")
+        else:
+            print(f"Total Drum Hits: {analysis['total_beats']}")
+        # Only show drum breakdown if not filtering
+        if not filter_drum:
+            print(f"\n{'Drum Breakdown:':-^60}")
+            
+            for drum, count in sorted(
+                analysis['drum_counts'].items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            ):
+                print(f"  {drum:<25} {count:>5} hits")
         
         # Print timing quality analysis
         print(f"\n{'TIMING QUALITY ANALYSIS':-^60}")
         print(f"Measures timing deviation from tempo grid (quantization)")
         print(f"Each hit compared to nearest beat position\n")
-        print(f"\n{'Timing Perfection Scores (Higher is Better)':-^60}")
         
         timing_quality = analysis.get('timing_quality', {})
+        
+        # Filter timing quality if requested
+        if filter_drum:
+            if filter_drum not in timing_quality:
+                print(f"\nError: Drum '{filter_drum}' not found in analysis.")
+                print(f"\nAvailable drums:")
+                for drum in sorted(timing_quality.keys()):
+                    print(f"  - {drum}")
+                return
+            timing_quality = {filter_drum: timing_quality[filter_drum]}
+        
+        print(f"\n{'Timing Perfection Scores (Higher is Better)':-^60}")
         
         # Sort by timing score (worst first to highlight areas needing work)
         sorted_quality = sorted(
@@ -362,15 +386,20 @@ class DrumAnalyzer:
             else:
                 print(f"\n  All drums show excellent timing! Keep it up!")
         
+        # Filter beats if requested
+        beats_to_show = analysis['beats']
+        if filter_drum:
+            beats_to_show = [b for b in analysis['beats'] if b['drum'] == filter_drum]
+        
         print(f"\n{'First 10 Beats:':-^60}")
-        for beat in analysis['beats'][:10]:
+        for beat in beats_to_show[:10]:
             print(f"  {beat['time_seconds']:>7.3f}s | "
                   f"Beat {beat['beat_position']:>6.2f} | "
                   f"{beat['drum']:<25} | "
                   f"Vel: {beat['velocity']:>3}")
         
-        if len(analysis['beats']) > 10:
-            print(f"  ... and {len(analysis['beats']) - 10} more beats")
+        if len(beats_to_show) > 10:
+            print(f"  ... and {len(beats_to_show) - 10} more beats")
         
         print(f"\n{'Legend:':-^60}")
         print(f"  Score   = Timing tightness (higher = closer to grid)")
@@ -383,18 +412,19 @@ class DrumAnalyzer:
         print(f"{'='*60}\n")
 
 
-def analyze_midi_drums(midi_file: str) -> Dict:
+def analyze_midi_drums(midi_file: str, filter_drum: str = None) -> Dict:
     """Analyze a MIDI drum file and return beat analysis data.
     
     Args:
         midi_file: Path to the MIDI file
+        filter_drum: Optional drum name to filter output (e.g., "Acoustic Snare")
         
     Returns:
         Dictionary containing beat analysis data
     """
     analyzer = DrumAnalyzer(midi_file)
     analysis = analyzer.analyze()
-    analyzer.print_summary(analysis)
+    analyzer.print_summary(analysis, filter_drum=filter_drum)
     return analysis
 
 
