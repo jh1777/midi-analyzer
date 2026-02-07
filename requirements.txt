@@ -1,0 +1,5 @@
+# MIDI processing
+mido>=1.3.0
+
+# Data analysis (optional but useful for beat analysis)
+numpy>=1.24.0

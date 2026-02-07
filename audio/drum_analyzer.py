@@ -1,0 +1,382 @@
+"""MIDI drum file analyzer."""
+
+import mido
+import numpy as np
+from collections import defaultdict
+from typing import Dict, List, Tuple, Optional
+
+
+# General MIDI drum mapping (channel 10)
+DRUM_MAP = {
+    35: "Acoustic Bass Drum",
+    36: "Bass Drum 1",
+    37: "Side Stick",
+    38: "Acoustic Snare",
+    39: "Hand Clap",
+    40: "Electric Snare",
+    41: "Low Floor Tom",
+    42: "Closed Hi-Hat",
+    43: "High Floor Tom",
+    44: "Pedal Hi-Hat",
+    45: "Low Tom",
+    46: "Open Hi-Hat",
+    47: "Low-Mid Tom",
+    48: "Hi-Mid Tom",
+    49: "Crash Cymbal 1",
+    50: "High Tom",
+    51: "Ride Cymbal 1",
+    52: "Chinese Cymbal",
+    53: "Ride Bell",
+    54: "Tambourine",
+    55: "Splash Cymbal",
+    56: "Cowbell",
+    57: "Crash Cymbal 2",
+    58: "Vibraslap",
+    59: "Ride Cymbal 2",
+}
+
+
+class DrumAnalyzer:
+    """Analyze drum patterns in MIDI files."""
+    
+    def __init__(self, midi_file: str):
+        """Initialize analyzer with MIDI file path."""
+        self.midi_file = midi_file
+        self.midi = mido.MidiFile(midi_file)
+        self.tempo = 500000  # Default tempo (120 BPM)
+        self.ticks_per_beat = self.midi.ticks_per_beat
+        
+    def calculate_timing_quality(self, beats: List[Dict]) -> Dict:
+        """Calculate timing consistency by measuring deviation from tempo grid.
+        
+        This quantizes each hit to the nearest beat grid position and measures
+        how early/late the actual hit is compared to perfect timing.
+        
+        Args:
+            beats: List of beat dictionaries with 'beat_position' (in beats)
+            
+        Returns:
+            Dictionary with timing quality metrics per drum type
+        """
+        # Group beats by drum type
+        drum_beats = defaultdict(list)
+        for beat in beats:
+            drum_beats[beat['drum']].append({
+                'time_seconds': beat['time_seconds'],
+                'beat_position': beat['beat_position']
+            })
+        
+        quality_metrics = {}
+        
+        # Determine grid resolution - check common subdivisions
+        # We'll try 16th notes (1/4 beat), 8th notes (1/2 beat), quarter notes (1 beat)
+        grid_sizes = [0.25, 0.5, 1.0]  # 16th, 8th, quarter notes
+        
+        for drum, hits in drum_beats.items():
+            if len(hits) < 3:
+                continue
+            
+            best_grid_size = None
+            best_score = float('inf')
+            best_errors = None
+            
+            # Try different grid resolutions and pick the one with smallest errors
+            for grid_size in grid_sizes:
+                timing_errors_ms = []
+                
+                for hit in hits:
+                    beat_pos = hit['beat_position']
+                    time_sec = hit['time_seconds']
+                    
+                    # Find nearest grid position
+                    nearest_grid = round(beat_pos / grid_size) * grid_size
+                    
+                    # Calculate timing error in beats
+                    error_beats = beat_pos - nearest_grid
+                    
+                    # Convert to milliseconds using tempo
+                    # 1 beat = 60/BPM seconds
+                    beat_duration_sec = mido.tick2second(
+                        self.ticks_per_beat,
+                        self.ticks_per_beat,
+                        self.tempo
+                    )
+                    error_ms = error_beats * beat_duration_sec * 1000
+                    
+                    timing_errors_ms.append(error_ms)
+                
+                # Calculate total absolute error for this grid size
+                total_error = np.sum(np.abs(timing_errors_ms))
+                
+                if total_error < best_score:
+                    best_score = total_error
+                    best_grid_size = grid_size
+                    best_errors = np.array(timing_errors_ms)
+            
+            if best_errors is None or len(best_errors) == 0:
+                continue
+            
+            # Calculate statistics on timing errors
+            mean_error_ms = np.mean(best_errors)
+            abs_mean_error_ms = np.mean(np.abs(best_errors))
+            std_error_ms = np.std(best_errors)
+            max_early_ms = np.min(best_errors)  # Most negative = earliest
+            max_late_ms = np.max(best_errors)   # Most positive = latest
+            
+            # Calculate timing tightness score (0-100)
+            # Based on absolute mean error:
+            # <5ms = Excellent (studio quality)
+            # <10ms = Good (tight drumming)
+            # <20ms = Fair (acceptable)
+            # >20ms = Needs work
+            
+            if abs_mean_error_ms < 5:
+                score = 100 - abs_mean_error_ms * 2  # 100-90
+            elif abs_mean_error_ms < 10:
+                score = 90 - (abs_mean_error_ms - 5) * 4  # 90-70
+            elif abs_mean_error_ms < 20:
+                score = 70 - (abs_mean_error_ms - 10) * 3  # 70-40
+            elif abs_mean_error_ms < 40:
+                score = 40 - (abs_mean_error_ms - 20) * 1.5  # 40-10
+            else:
+                score = max(0, 10 - (abs_mean_error_ms - 40) * 0.2)
+            
+            # Determine if rushing or dragging
+            if mean_error_ms > 2:
+                tendency = 'Rushing (playing ahead)'
+            elif mean_error_ms < -2:
+                tendency = 'Dragging (playing behind)'
+            else:
+                tendency = 'Centered'
+            
+            # Grid name
+            grid_names = {0.25: '16th notes', 0.5: '8th notes', 1.0: 'quarter notes'}
+            grid_name = grid_names.get(best_grid_size, f'{best_grid_size} beats')
+            
+            quality_metrics[drum] = {
+                'hit_count': len(hits),
+                'grid_size': best_grid_size,
+                'grid_name': grid_name,
+                'mean_error_ms': round(float(mean_error_ms), 2),
+                'abs_mean_error_ms': round(float(abs_mean_error_ms), 2),
+                'std_dev_ms': round(float(std_error_ms), 2),
+                'max_early_ms': round(float(max_early_ms), 2),
+                'max_late_ms': round(float(max_late_ms), 2),
+                'timing_score': round(float(score), 1),
+                'tendency': tendency,
+            }
+            
+            # Add timing rating
+            if score >= 90:
+                quality_metrics[drum]['rating'] = 'Excellent'
+            elif score >= 70:
+                quality_metrics[drum]['rating'] = 'Good'
+            elif score >= 40:
+                quality_metrics[drum]['rating'] = 'Fair'
+            elif score >= 20:
+                quality_metrics[drum]['rating'] = 'Needs Work'
+            else:
+                quality_metrics[drum]['rating'] = 'Poor'
+        
+        return quality_metrics
+    
+    def analyze(self) -> Dict:
+        """Analyze the MIDI file and return beat analysis data."""
+        beats = []
+        drum_counts = defaultdict(int)
+        current_time = 0  # Time in ticks
+        
+        # Process all tracks
+        for track in self.midi.tracks:
+            current_time = 0
+            
+            for msg in track:
+                current_time += msg.time
+                
+                # Update tempo if found
+                if msg.type == 'set_tempo':
+                    self.tempo = msg.tempo
+                
+                # Process note_on messages on drum channel (channel 9, 0-indexed)
+                if msg.type == 'note_on' and msg.velocity > 0:
+                    # Convert ticks to seconds
+                    time_seconds = mido.tick2second(
+                        current_time, 
+                        self.ticks_per_beat, 
+                        self.tempo
+                    )
+                    
+                    # Convert ticks to beats
+                    beat_position = current_time / self.ticks_per_beat
+                    
+                    drum_name = DRUM_MAP.get(msg.note, f"Unknown Drum {msg.note}")
+                    
+                    beats.append({
+                        'time_seconds': round(time_seconds, 4),
+                        'beat_position': round(beat_position, 4),
+                        'note': msg.note,
+                        'drum': drum_name,
+                        'velocity': msg.velocity,
+                        'channel': msg.channel
+                    })
+                    
+                    drum_counts[drum_name] += 1
+        
+        # Sort beats by time
+        beats.sort(key=lambda x: x['time_seconds'])
+        
+        # Calculate statistics
+        total_duration = mido.tick2second(
+            current_time,
+            self.ticks_per_beat,
+            self.tempo
+        )
+        
+        bpm = mido.tempo2bpm(self.tempo)
+        
+        # Calculate timing quality
+        timing_quality = self.calculate_timing_quality(beats)
+        
+        return {
+            'file': self.midi_file,
+            'duration_seconds': round(total_duration, 2),
+            'tempo_bpm': round(bpm, 2),
+            'ticks_per_beat': self.ticks_per_beat,
+            'total_beats': len(beats),
+            'drum_counts': dict(drum_counts),
+            'beats': beats,
+            'timing_quality': timing_quality
+        }
+    
+    def print_summary(self, analysis: Dict):
+        """Print a summary of the analysis."""
+        print(f"\n{'='*60}")
+        print(f"MIDI Drum Analysis: {analysis['file']}")
+        print(f"{'='*60}")
+        print(f"Duration: {analysis['duration_seconds']}s")
+        print(f"Tempo: {analysis['tempo_bpm']} BPM")
+        print(f"Total Drum Hits: {analysis['total_beats']}")
+        print(f"\n{'Drum Breakdown:':-^60}")
+        
+        for drum, count in sorted(
+            analysis['drum_counts'].items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        ):
+            print(f"  {drum:<25} {count:>5} hits")
+        
+        # Print timing quality analysis
+        print(f"\n{'TIMING QUALITY ANALYSIS':-^60}")
+        print(f"Measures timing deviation from tempo grid (quantization)")
+        print(f"Each hit compared to nearest beat position\n")
+        print(f"\n{'Timing Perfection Scores (Higher is Better)':-^60}")
+        
+        timing_quality = analysis.get('timing_quality', {})
+        
+        # Sort by timing score (worst first to highlight areas needing work)
+        sorted_quality = sorted(
+            timing_quality.items(),
+            key=lambda x: x[1]['timing_score']
+        )
+        
+        if sorted_quality:
+            print(f"\n  {'Drum':<25} {'Score':>6} {'Rating':<12} {'Error':>8} {'Hits':>5}")
+            print(f"  {'-'*60}")
+            
+            for drum, metrics in sorted_quality:
+                score = metrics['timing_score']
+                rating = metrics['rating']
+                avg_error = metrics['abs_mean_error_ms']
+                hits = metrics['hit_count']
+                
+                # Color-code the rating (using text indicators)
+                if score >= 70:
+                    indicator = '✓'
+                elif score >= 40:
+                    indicator = '~'
+                else:
+                    indicator = '✗'
+                
+                print(f"  {drum:<25} {score:>6.1f} {rating:<12} {avg_error:>6.1f}ms {hits:>5} {indicator}")
+            
+            # Print detailed statistics for worst performers
+            print(f"\n{'Detailed Statistics (Areas Needing Work)':-^60}")
+            worst_performers = [item for item in sorted_quality if item[1]['timing_score'] < 70][:5]
+            
+            if worst_performers:
+                for drum, metrics in worst_performers:
+                    print(f"\n  {drum}:")
+                    print(f"    Timing Score:     {metrics['timing_score']:.1f}/100 ({metrics['rating']})")
+                    print(f"    Total Hits:       {metrics['hit_count']}")
+                    print(f"    Quantized to:     {metrics['grid_name']}")
+                    print(f"    Avg Error:        {metrics['abs_mean_error_ms']:.2f}ms (absolute)")
+                    print(f"    Mean Deviation:   {metrics['mean_error_ms']:+.2f}ms ({metrics['tendency']})")
+                    print(f"    Std Deviation:    {metrics['std_dev_ms']:.2f}ms")
+                    print(f"    Error Range:      {metrics['max_early_ms']:.2f}ms (early) to {metrics['max_late_ms']:.2f}ms (late)")
+                    
+                    # Interpretation
+                    error = metrics['abs_mean_error_ms']
+                    mean_dev = metrics['mean_error_ms']
+                    
+                    if error < 5:
+                        print(f"    → Excellent timing - studio quality")
+                    elif error < 10:
+                        print(f"    → Good timing - tight drumming")
+                    elif error < 20:
+                        print(f"    → Fair timing - noticeable drift")
+                    else:
+                        print(f"    → Poor timing - practice with metronome")
+                    
+                    if abs(mean_dev) > 5:
+                        if mean_dev > 0:
+                            print(f"    → Consistently rushing - try relaxing the tempo")
+                        else:
+                            print(f"    → Consistently dragging - try pushing the tempo")
+            else:
+                print(f"\n  All drums show excellent timing! Keep it up!")
+        
+        print(f"\n{'First 10 Beats:':-^60}")
+        for beat in analysis['beats'][:10]:
+            print(f"  {beat['time_seconds']:>7.3f}s | "
+                  f"Beat {beat['beat_position']:>6.2f} | "
+                  f"{beat['drum']:<25} | "
+                  f"Vel: {beat['velocity']:>3}")
+        
+        if len(analysis['beats']) > 10:
+            print(f"  ... and {len(analysis['beats']) - 10} more beats")
+        
+        print(f"\n{'Legend:':-^60}")
+        print(f"  Score   = Timing tightness (higher = closer to grid)")
+        print(f"  Error   = Average deviation from perfect timing (ms)")
+        print(f"  ✓       = Good timing (70+, <10ms avg error)")
+        print(f"  ~       = Fair timing (40-69, 10-20ms avg error)")
+        print(f"  ✗       = Needs work (<40, >20ms avg error)")
+        print(f"\nNote: Each hit is quantized to nearest grid position (16th/8th/quarter)")
+        print(f"      and deviation measured. Positive = late, negative = early.")
+        print(f"{'='*60}\n")
+
+
+def analyze_midi_drums(midi_file: str) -> Dict:
+    """Analyze a MIDI drum file and return beat analysis data.
+    
+    Args:
+        midi_file: Path to the MIDI file
+        
+    Returns:
+        Dictionary containing beat analysis data
+    """
+    analyzer = DrumAnalyzer(midi_file)
+    analysis = analyzer.analyze()
+    analyzer.print_summary(analysis)
+    return analysis
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python -m audio.drum_analyzer <midi_file>")
+        sys.exit(1)
+    
+    midi_file = sys.argv[1]
+    analyze_midi_drums(midi_file)
