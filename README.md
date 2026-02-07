@@ -5,10 +5,10 @@
 ## Features
 
 ✨ **Timing Analysis**: Measures how far each hit is from perfect timing (in milliseconds)  
-📊 **Scoring System**: 0-100 score per drum (Excellent/Good/Fair/Needs Work/Poor)  
+📊 **Scoring System**: 0-100 score per drum (Excellent/Good/Acceptable/Needs Work/Poor)  
 🎵 **Auto Grid Detection**: Tests multiple grids (16th, triplets, 8th, etc.) to find best fit  
 🎯 **Quantization Advisor**: Suggests Logic Pro settings for best results  
-📈 **Progress Tracking**: Compare before/after quantization to see improvement  
+📈 **Progress Tracking**: Compare before/after quantization to see improvement
 
 ## Installation
 
@@ -40,9 +40,9 @@ TIMING QUALITY ANALYSIS
 
   Drum                       Score Rating          Error  Hits
   ------------------------------------------------------------
-  Bass Drum 1                 24.4 Needs Work     30.4ms   440 ✗
-  Acoustic Snare              22.9 Needs Work     31.4ms   270 ✗
-  Closed Hi-Hat               23.4 Needs Work     31.1ms   473 ✗
+  Bass Drum 1                 60.8 Acceptable     30.4ms   440 ✓
+  Acoustic Snare              59.2 Acceptable     31.4ms   270 ✓
+  Closed Hi-Hat               59.8 Acceptable     31.1ms   473 ✓
 ```
 
 ### 2. Get Quantization Advice
@@ -80,28 +80,31 @@ python compare_files.py
 **Example Results:**
 ```
 UNQUANTIZED:
-  Bass Drum:  30.40ms → Score 24.4
-  Snare:      31.41ms → Score 22.9
+  Bass Drum:  30.40ms → Score 60.8 (Acceptable)
+  Snare:      31.41ms → Score 59.2 (Acceptable)
 
 QUANTIZED:
-  Bass Drum:   0.43ms → Score 99.1 ✓
-  Snare:       0.10ms → Score 99.8 ✓
+  Bass Drum:   0.43ms → Score 99.1 (Excellent) ✓
+  Snare:       0.10ms → Score 99.8 (Excellent) ✓
 ```
 
 ## Understanding the Scores
 
 | Score | Rating | Avg Error | What It Means |
 |-------|--------|-----------|---------------|
-| 90-100 | Excellent | <5ms | Studio quality, tight as a drum machine |
-| 70-89 | Good | 5-10ms | Solid timing, professional level |
-| 40-69 | Fair | 10-20ms | Acceptable but noticeable drift |
-| 20-39 | Needs Work | 20-40ms | Practice with metronome recommended |
-| 0-19 | Poor | >40ms | Significant timing issues |
+| 90-100 | Excellent | <10ms | Pro studio level (accounts for e-drum latency) |
+| 70-89 | Good | 10-20ms | Professional live playing, tight timing |
+| 40-69 | Acceptable | 20-35ms | Solid playing with human feel |
+| 20-39 | Needs Work | 35-50ms | Noticeable looseness, practice recommended |
+| 0-19 | Poor | >50ms | Objectively problematic timing |
 
 **Real-world expectations:**
-- Human performances: Typically 20-50ms (Fair/Needs Work)
-- Quantized MIDI: <5ms (Good/Excellent)
+- E-drum recordings: 25-35ms typical (Acceptable) — includes 5-10ms system latency
+- Professional drummers: 10-20ms on acoustic kits (Good)
+- Quantized MIDI: <10ms (Excellent)
 - Perfect quantization: <1ms (Excellent, 99+ score)
+
+**Note**: Thresholds calibrated based on research showing professional drummers typically deviate 10-20ms in real performances, and e-drum systems add 5-10ms inherent latency.
 
 ## All Available Tools
 

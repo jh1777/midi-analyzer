@@ -128,27 +128,33 @@ class DrumAnalyzer:
             max_late_ms = np.max(best_errors)   # Most positive = latest
             
             # Calculate timing tightness score (0-100)
-            # Based on absolute mean error:
-            # <5ms = Excellent (studio quality)
-            # <10ms = Good (tight drumming)
-            # <20ms = Fair (acceptable)
-            # >20ms = Needs work
+            # Based on research:
+            # - Professional drummers: 10-20ms typical deviation
+            # - E-drum systems: 5-10ms inherent latency
+            # - Perceptual threshold: 15-20ms for noticing timing issues
+            # Thresholds calibrated for real human e-drum performance:
+            # <10ms = Excellent (pro studio level, accounting for e-drum latency)
+            # 10-20ms = Good (professional live playing)
+            # 20-35ms = Acceptable (solid playing with human feel)
+            # 35-50ms = Needs Work (noticeable looseness)
+            # >50ms = Poor (objectively problematic)
             
-            if abs_mean_error_ms < 5:
-                score = 100 - abs_mean_error_ms * 2  # 100-90
-            elif abs_mean_error_ms < 10:
-                score = 90 - (abs_mean_error_ms - 5) * 4  # 90-70
+            if abs_mean_error_ms < 10:
+                score = 100 - abs_mean_error_ms * 1  # 100-90
             elif abs_mean_error_ms < 20:
-                score = 70 - (abs_mean_error_ms - 10) * 3  # 70-40
-            elif abs_mean_error_ms < 40:
-                score = 40 - (abs_mean_error_ms - 20) * 1.5  # 40-10
+                score = 90 - (abs_mean_error_ms - 10) * 2  # 90-70
+            elif abs_mean_error_ms < 35:
+                score = 70 - (abs_mean_error_ms - 20) * 2  # 70-40
+            elif abs_mean_error_ms < 50:
+                score = 40 - (abs_mean_error_ms - 35) * 1.33  # 40-20
             else:
-                score = max(0, 10 - (abs_mean_error_ms - 40) * 0.2)
+                score = max(0, 20 - (abs_mean_error_ms - 50) * 0.4)
             
             # Determine if rushing or dragging
-            if mean_error_ms > 2:
+            # Threshold at 5ms to avoid flagging normal human variation
+            if mean_error_ms > 5:
                 tendency = 'Rushing (playing ahead)'
-            elif mean_error_ms < -2:
+            elif mean_error_ms < -5:
                 tendency = 'Dragging (playing behind)'
             else:
                 tendency = 'Centered'
@@ -183,7 +189,7 @@ class DrumAnalyzer:
             elif score >= 70:
                 quality_metrics[drum]['rating'] = 'Good'
             elif score >= 40:
-                quality_metrics[drum]['rating'] = 'Fair'
+                quality_metrics[drum]['rating'] = 'Acceptable'
             elif score >= 20:
                 quality_metrics[drum]['rating'] = 'Needs Work'
             else:
