@@ -31,13 +31,13 @@ interface FileAnalysis {
 
 const API_BASE_URL = 'http://localhost:8000'
 
-// Fixed drum columns to display
+// Fixed drum columns to display with flexible matching
 const DRUM_COLUMNS = [
-  'Acoustic Snare',
-  'Bass Drum 1',
-  'Closed Hi-Hat',
-  'Crash Cymbal 1',
-  'Ride Cymbal 1'
+  { display: 'Snare', matches: ['Snare'] },
+  { display: 'Bass Drum', matches: ['Bass'] },
+  { display: 'Hi-Hat', matches: ['Hi-Hat', 'Hi Hat'] },
+  { display: 'Crash', matches: ['Crash'] },
+  { display: 'Ride', matches: ['Ride'] }
 ]
 
 type SortDirection = 'asc' | 'desc' | null
@@ -136,8 +136,8 @@ function App() {
     }
   }
 
-  const handleSort = (drumName: string) => {
-    if (sortColumn === drumName) {
+  const handleSort = (drumDisplay: string) => {
+    if (sortColumn === drumDisplay) {
       // Cycle through: asc -> desc -> null
       if (sortDirection === 'asc') {
         setSortDirection('desc')
@@ -146,7 +146,7 @@ function App() {
         setSortDirection(null)
       }
     } else {
-      setSortColumn(drumName)
+      setSortColumn(drumDisplay)
       setSortDirection('asc')
     }
   }
@@ -154,9 +154,16 @@ function App() {
   const getSortedFiles = () => {
     if (!sortColumn || !sortDirection) return files
 
+    const drumColumn = DRUM_COLUMNS.find(col => col.display === sortColumn)
+    if (!drumColumn) return files
+
     return [...files].sort((a, b) => {
-      const drumA = a.top_drums.find(d => d.name === sortColumn)
-      const drumB = b.top_drums.find(d => d.name === sortColumn)
+      const drumA = a.top_drums.find(d => 
+        drumColumn.matches.some(pattern => d.name.includes(pattern))
+      )
+      const drumB = b.top_drums.find(d => 
+        drumColumn.matches.some(pattern => d.name.includes(pattern))
+      )
 
       // Files without the drum go to the end
       if (!drumA && !drumB) return 0
@@ -170,8 +177,11 @@ function App() {
     })
   }
 
-  const getDrumData = (file: FileAnalysis, drumName: string) => {
-    return file.top_drums.find(d => d.name === drumName)
+  const getDrumData = (file: FileAnalysis, drumColumn: { display: string; matches: string[] }) => {
+    // Find first drum that matches any of the patterns
+    return file.top_drums.find(d => 
+      drumColumn.matches.some(pattern => d.name.includes(pattern))
+    )
   }
 
   return (
@@ -262,14 +272,14 @@ function App() {
                   <TableHead className="text-center">Duration</TableHead>
                   <TableHead className="text-center">Tempo</TableHead>
                   <TableHead className="text-center">Total Hits</TableHead>
-                  {DRUM_COLUMNS.map((drumName) => (
-                    <TableHead key={drumName}>
+                  {DRUM_COLUMNS.map((drumCol) => (
+                    <TableHead key={drumCol.display}>
                       <button
-                        onClick={() => handleSort(drumName)}
+                        onClick={() => handleSort(drumCol.display)}
                         className="flex items-center gap-1 hover:text-gray-900 transition-colors"
                       >
-                        <span className="text-xs">{drumName}</span>
-                        {sortColumn === drumName ? (
+                        <span className="text-xs">{drumCol.display}</span>
+                        {sortColumn === drumCol.display ? (
                           sortDirection === 'asc' ? (
                             <ArrowUp className="w-3 h-3" />
                           ) : (
@@ -301,10 +311,10 @@ function App() {
                       {file.tempo > 0 ? `${Math.round(file.tempo)} BPM` : '-'}
                     </TableCell>
                     <TableCell className="text-center">{file.total_hits || '-'}</TableCell>
-                    {DRUM_COLUMNS.map((drumName) => {
-                      const drum = getDrumData(file, drumName)
+                    {DRUM_COLUMNS.map((drumCol) => {
+                      const drum = getDrumData(file, drumCol)
                       return (
-                        <TableCell key={drumName}>
+                        <TableCell key={drumCol.display}>
                           {drum ? (
                             <div className="flex flex-col">
                               <span className="text-xs text-gray-500">
@@ -312,6 +322,9 @@ function App() {
                               </span>
                               <span className={`text-xs ${getRatingColor(drum.rating)}`}>
                                 Score: {drum.score}
+                              </span>
+                              <span className="text-xs text-gray-400">
+                                {drum.name}
                               </span>
                             </div>
                           ) : (
