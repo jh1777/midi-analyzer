@@ -51,6 +51,13 @@ function App() {
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
+  const formatDuration = (seconds: number): string => {
+    if (seconds <= 0) return '-'
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
   useEffect(() => {
     fetchConfig()
     analyzeFiles()
@@ -136,8 +143,8 @@ function App() {
     }
   }
 
-  const handleSort = (drumDisplay: string) => {
-    if (sortColumn === drumDisplay) {
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
       // Cycle through: asc -> desc -> null
       if (sortDirection === 'asc') {
         setSortDirection('desc')
@@ -146,7 +153,7 @@ function App() {
         setSortDirection(null)
       }
     } else {
-      setSortColumn(drumDisplay)
+      setSortColumn(column)
       setSortDirection('asc')
     }
   }
@@ -154,6 +161,22 @@ function App() {
   const getSortedFiles = () => {
     if (!sortColumn || !sortDirection) return files
 
+    // Handle duration and total hits sorting
+    if (sortColumn === 'duration') {
+      return [...files].sort((a, b) => {
+        const diff = a.duration - b.duration
+        return sortDirection === 'asc' ? diff : -diff
+      })
+    }
+
+    if (sortColumn === 'total_hits') {
+      return [...files].sort((a, b) => {
+        const diff = a.total_hits - b.total_hits
+        return sortDirection === 'asc' ? diff : -diff
+      })
+    }
+
+    // Handle drum column sorting
     const drumColumn = DRUM_COLUMNS.find(col => col.display === sortColumn)
     if (!drumColumn) return files
 
@@ -270,9 +293,41 @@ function App() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[200px]">File</TableHead>
-                  <TableHead className="text-center">Duration</TableHead>
+                  <TableHead className="text-center">
+                    <button
+                      onClick={() => handleSort('duration')}
+                      className="flex items-center justify-center gap-1 hover:text-gray-900 transition-colors mx-auto"
+                    >
+                      <span>Duration</span>
+                      {sortColumn === 'duration' ? (
+                        sortDirection === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
                   <TableHead className="text-center">Tempo</TableHead>
-                  <TableHead className="text-center">Total Hits</TableHead>
+                  <TableHead className="text-center">
+                    <button
+                      onClick={() => handleSort('total_hits')}
+                      className="flex items-center justify-center gap-1 hover:text-gray-900 transition-colors mx-auto"
+                    >
+                      <span>Total Hits</span>
+                      {sortColumn === 'total_hits' ? (
+                        sortDirection === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
                   {DRUM_COLUMNS.map((drumCol) => (
                     <TableHead key={drumCol.display}>
                       <button
@@ -306,7 +361,7 @@ function App() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
-                      {file.duration > 0 ? `${Math.round(file.duration)}s` : '-'}
+                      {formatDuration(file.duration)}
                     </TableCell>
                     <TableCell className="text-center">
                       {file.tempo > 0 ? `${Math.round(file.tempo)} BPM` : '-'}
