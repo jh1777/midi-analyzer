@@ -170,8 +170,9 @@ function App() {
       if (!drumA) return 1
       if (!drumB) return -1
 
-      const scoreA = getRatingValue(drumA.rating)
-      const scoreB = getRatingValue(drumB.rating)
+      // Sort by actual numeric score (0-100)
+      const scoreA = drumA.score
+      const scoreB = drumB.score
 
       return sortDirection === 'asc' ? scoreA - scoreB : scoreB - scoreA
     })
