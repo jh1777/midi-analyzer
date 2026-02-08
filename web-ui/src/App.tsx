@@ -56,17 +56,24 @@ function App() {
 
   const updateConfig = async () => {
     try {
-      await fetch(`${API_BASE_URL}/config`, {
+      const response = await fetch(`${API_BASE_URL}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ midi_folder: newFolder })
       })
-      setMidiFolder(newFolder)
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update folder path')
+      }
+      
+      const data = await response.json()
+      setMidiFolder(data.midi_folder)
       setEditingFolder(false)
       analyzeFiles()
     } catch (error) {
       console.error('Failed to update config:', error)
-      alert('Failed to update folder path')
+      alert(error instanceof Error ? error.message : 'Failed to update folder path')
     }
   }
 
@@ -128,7 +135,7 @@ function App() {
                     value={newFolder}
                     onChange={(e) => setNewFolder(e.target.value)}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="/path/to/midi-files"
+                    placeholder="mid-files or /absolute/path"
                   />
                   <Button onClick={updateConfig} size="sm">
                     Save

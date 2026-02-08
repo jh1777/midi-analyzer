@@ -54,9 +54,21 @@ def get_config():
 def update_config(config: ConfigModel):
     """Update configuration."""
     global MIDI_FOLDER
+    
+    # Get the project root directory (where api_server.py is located)
+    project_root = Path(__file__).parent
+    
+    # Handle relative paths by resolving them relative to project root
     new_path = Path(config.midi_folder)
+    if not new_path.is_absolute():
+        new_path = (project_root / new_path).resolve()
+    
     if not new_path.exists():
-        raise HTTPException(status_code=400, detail="Folder does not exist")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Folder does not exist: {new_path}"
+        )
+    
     MIDI_FOLDER = new_path
     return {"midi_folder": str(MIDI_FOLDER)}
 
