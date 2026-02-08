@@ -23,7 +23,28 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### 1. Analyze Your Drumming
+### Option 1: Web UI (Recommended)
+
+Analyze multiple MIDI files with a visual interface:
+
+```bash
+./start.sh
+```
+
+This will start:
+- **Backend API** on http://localhost:8000
+- **Web UI** on http://localhost:5173
+
+The web interface lets you:
+- View all MIDI files in the `mid-files` folder
+- See timing analysis results in a table
+- Top 5 drums displayed with timing error and score
+- Refresh to scan for new files
+- Configure the MIDI folder path
+
+### Option 2: Command Line
+
+Analyze individual files:
 
 ```bash
 python -m audio your_drums.mid
@@ -107,6 +128,23 @@ QUANTIZED:
 **Note**: Thresholds calibrated based on research showing professional drummers typically deviate 10-20ms in real performances, and e-drum systems add 5-10ms inherent latency.
 
 ## All Available Tools
+
+### Web UI
+```bash
+./start.sh
+```
+Launches the web interface for analyzing multiple files at once. See all your MIDI files with their timing analysis in a visual table.
+
+**Manual startup:**
+```bash
+# Terminal 1 - Backend
+source venv/bin/activate
+python api_server.py
+
+# Terminal 2 - Frontend
+cd web-ui
+npm run dev
+```
 
 ### Main Analyzer
 ```bash
@@ -200,6 +238,7 @@ ruff check audio/
 ## Documentation
 
 - **README.md** (this file) - User guide
+- **WEB_UI.md** - Web interface documentation
 - **AGENTS.md** - Architecture and design decisions
 - **DEVELOPMENT_SUMMARY.md** - Complete development history
 
