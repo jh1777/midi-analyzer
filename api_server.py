@@ -102,15 +102,15 @@ def analyze_file(file_path: str):
         analyzer = DrumAnalyzer(str(full_path))
         analysis = analyzer.analyze()
         
-        # Get top 5 drums by hit count
+        # Return all drums (frontend will filter to specific columns)
         timing_quality = analysis.get('timing_quality', {})
         
-        # Sort by timing score (best first for display)
+        # Sort by hit count (most played drums first)
         sorted_drums = sorted(
             timing_quality.items(),
-            key=lambda x: x[1]['timing_score'],
+            key=lambda x: x[1]['hit_count'],
             reverse=True
-        )[:5]
+        )
         
         top_drums = []
         for drum_name, metrics in sorted_drums:
@@ -151,13 +151,13 @@ def analyze_all_files():
             analyzer = DrumAnalyzer(str(file_path))
             analysis = analyzer.analyze()
             
-            # Get top 5 drums by timing score
+            # Return all drums (frontend will filter to specific columns)
             timing_quality = analysis.get('timing_quality', {})
             sorted_drums = sorted(
                 timing_quality.items(),
-                key=lambda x: x[1]['timing_score'],
+                key=lambda x: x[1]['hit_count'],
                 reverse=True
-            )[:5]
+            )
             
             top_drums = []
             for drum_name, metrics in sorted_drums:
