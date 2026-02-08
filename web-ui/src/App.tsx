@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, Settings } from 'lucide-react'
+import { RefreshCw, Settings, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { Button } from './components/ui/button'
 import {
   Table,
@@ -31,12 +31,25 @@ interface FileAnalysis {
 
 const API_BASE_URL = 'http://localhost:8000'
 
+// Fixed drum columns to display
+const DRUM_COLUMNS = [
+  'Acoustic Snare',
+  'Bass Drum 1',
+  'Closed Hi-Hat',
+  'Crash Cymbal 1',
+  'Ride Cymbal 1'
+]
+
+type SortDirection = 'asc' | 'desc' | null
+
 function App() {
   const [files, setFiles] = useState<FileAnalysis[]>([])
   const [loading, setLoading] = useState(false)
   const [midiFolder, setMidiFolder] = useState('')
   const [editingFolder, setEditingFolder] = useState(false)
   const [newFolder, setNewFolder] = useState('')
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
 
   useEffect(() => {
     fetchConfig()
@@ -85,6 +98,8 @@ function App() {
       })
       const data = await response.json()
       setFiles(data.results || [])
+      setSortColumn(null)
+      setSortDirection(null)
     } catch (error) {
       console.error('Failed to analyze files:', error)
       alert('Failed to analyze files. Make sure the backend is running.')
@@ -108,6 +123,55 @@ function App() {
       default:
         return 'text-gray-600'
     }
+  }
+
+  const getRatingValue = (rating: string): number => {
+    switch (rating.toLowerCase()) {
+      case 'excellent': return 5
+      case 'good': return 4
+      case 'acceptable': return 3
+      case 'needs work': return 2
+      case 'poor': return 1
+      default: return 0
+    }
+  }
+
+  const handleSort = (drumName: string) => {
+    if (sortColumn === drumName) {
+      // Cycle through: asc -> desc -> null
+      if (sortDirection === 'asc') {
+        setSortDirection('desc')
+      } else if (sortDirection === 'desc') {
+        setSortColumn(null)
+        setSortDirection(null)
+      }
+    } else {
+      setSortColumn(drumName)
+      setSortDirection('asc')
+    }
+  }
+
+  const getSortedFiles = () => {
+    if (!sortColumn || !sortDirection) return files
+
+    return [...files].sort((a, b) => {
+      const drumA = a.top_drums.find(d => d.name === sortColumn)
+      const drumB = b.top_drums.find(d => d.name === sortColumn)
+
+      // Files without the drum go to the end
+      if (!drumA && !drumB) return 0
+      if (!drumA) return 1
+      if (!drumB) return -1
+
+      const scoreA = getRatingValue(drumA.rating)
+      const scoreB = getRatingValue(drumB.rating)
+
+      return sortDirection === 'asc' ? scoreA - scoreB : scoreB - scoreA
+    })
+  }
+
+  const getDrumData = (file: FileAnalysis, drumName: string) => {
+    return file.top_drums.find(d => d.name === drumName)
   }
 
   return (
@@ -198,15 +262,29 @@ function App() {
                   <TableHead className="text-center">Duration</TableHead>
                   <TableHead className="text-center">Tempo</TableHead>
                   <TableHead className="text-center">Total Hits</TableHead>
-                  <TableHead>Drum 1</TableHead>
-                  <TableHead>Drum 2</TableHead>
-                  <TableHead>Drum 3</TableHead>
-                  <TableHead>Drum 4</TableHead>
-                  <TableHead>Drum 5</TableHead>
+                  {DRUM_COLUMNS.map((drumName) => (
+                    <TableHead key={drumName}>
+                      <button
+                        onClick={() => handleSort(drumName)}
+                        className="flex items-center gap-1 hover:text-gray-900 transition-colors"
+                      >
+                        <span className="text-xs">{drumName}</span>
+                        {sortColumn === drumName ? (
+                          sortDirection === 'asc' ? (
+                            <ArrowUp className="w-3 h-3" />
+                          ) : (
+                            <ArrowDown className="w-3 h-3" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 opacity-30" />
+                        )}
+                      </button>
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {files.map((file) => (
+                {getSortedFiles().map((file) => (
                   <TableRow key={file.path}>
                     <TableCell className="font-medium">
                       <div className="flex flex-col">
@@ -223,15 +301,12 @@ function App() {
                       {file.tempo > 0 ? `${Math.round(file.tempo)} BPM` : '-'}
                     </TableCell>
                     <TableCell className="text-center">{file.total_hits || '-'}</TableCell>
-                    {[0, 1, 2, 3, 4].map((index) => {
-                      const drum = file.top_drums[index]
+                    {DRUM_COLUMNS.map((drumName) => {
+                      const drum = getDrumData(file, drumName)
                       return (
-                        <TableCell key={index}>
+                        <TableCell key={drumName}>
                           {drum ? (
                             <div className="flex flex-col">
-                              <span className="text-xs font-medium text-gray-700">
-                                {drum.name}
-                              </span>
                               <span className="text-xs text-gray-500">
                                 {drum.error_ms}ms
                               </span>
