@@ -7,3 +7,8 @@ numpy>=1.24.0
 # Web API (for web UI)
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
+
+# Audio analysis (for play-along comparison)
+librosa>=0.10.0
+scipy>=1.11.0
+soundfile>=0.12.0

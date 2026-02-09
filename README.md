@@ -171,6 +171,29 @@ python compare_files.py
 ```
 Compare two files side-by-side (edit script to set file paths).
 
+### Play-Along Comparison (NEW!)
+```bash
+python compare_playalong.py <your_drums.mid> <reference_drums.mp3>
+```
+Compare your MIDI play-along against the original audio drum track!
+
+**Example workflow:**
+1. Use Moises or Logic Pro to separate drums from song
+2. Play along and record MIDI in your DAW
+3. Export both: your MIDI + original drum audio
+4. Run comparison to see how well you matched!
+
+**Example output:**
+```
+Overall Score:  87.3/100
+Rating:         Great! 👍
+Matched Hits:   208/245 (84.9%)
+Mean Error:     18.2ms (±12.4ms)
+Within 50ms:    232 hits (94.7%)
+Missed Hits:    6
+Extra Hits:     12
+```
+
 ### Debug Tools
 ```bash
 python debug_timing.py        # Quick overview of one file
