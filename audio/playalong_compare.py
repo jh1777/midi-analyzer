@@ -68,19 +68,11 @@ class PlayAlongComparator:
         
         print(f"Detecting onsets (sample rate: {sr} Hz)...")
         
-        # Use multiple onset detection methods for better accuracy
-        # Method 1: Energy-based (good for drums)
-        onset_env_energy = librosa.onset.onset_strength(
+        # Use onset strength detection optimized for drums
+        # This combines energy and spectral information
+        onset_env = librosa.onset.onset_strength(
             y=y, sr=sr, aggregate=np.median
         )
-        
-        # Method 2: Spectral flux (good for transients)
-        onset_env_spectral = librosa.onset.onset_strength(
-            y=y, sr=sr, feature=librosa.feature.spectral_flux
-        )
-        
-        # Combine both methods (average)
-        onset_env = (onset_env_energy + onset_env_spectral) / 2
         
         # Detect onset peaks
         onsets_frames = librosa.onset.onset_detect(
@@ -156,10 +148,22 @@ class PlayAlongComparator:
         best_offset = 0.0
         best_tempo_ratio = 1.0
         
-        # Search for time offset (0-10 seconds)
-        for offset in np.linspace(-2, 10, 50):
-            # Search for tempo ratio (0.95-1.05)
-            for tempo_ratio in np.linspace(0.98, 1.02, 20):
+        # Estimate rough offset based on where MIDI starts vs audio length
+        midi_start = midi_onsets[0] if len(midi_onsets) > 0 else 0
+        audio_end = audio_onsets[-1] if len(audio_onsets) > 0 else 0
+        
+        # If MIDI starts very late, adjust search range
+        if midi_start > audio_end:
+            # MIDI starts after audio ends - need large negative offset
+            offset_range = np.linspace(-midi_start - 10, -midi_start + audio_end + 10, 50)
+        else:
+            # Normal case - search reasonable range
+            offset_range = np.linspace(-10, 10, 50)
+        
+        # Search for time offset
+        for offset in offset_range:
+            # Search for tempo ratio
+            for tempo_ratio in np.linspace(0.95, 1.05, 20):
                 # Transform MIDI onsets
                 transformed = (midi_onsets[:n_align] * tempo_ratio) + offset
                 
