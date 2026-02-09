@@ -34,7 +34,9 @@ class PlayAlongComparator:
         midi_file: str,
         audio_file: str,
         match_threshold_ms: float = 50.0,
-        onset_threshold: float = 0.3
+        onset_threshold: float = 0.3,
+        audio_bpm: Optional[float] = None,
+        midi_bpm: Optional[float] = None
     ):
         """Initialize comparator.
         
@@ -43,11 +45,15 @@ class PlayAlongComparator:
             audio_file: Path to reference audio drum track (MP3/WAV)
             match_threshold_ms: Max time difference to consider a match (default 50ms)
             onset_threshold: Sensitivity for onset detection (0-1, higher = less sensitive)
+            audio_bpm: Original tempo of audio file (if known). Will auto-detect if None.
+            midi_bpm: Tempo of MIDI recording (if known). Will extract from MIDI if None.
         """
         self.midi_file = Path(midi_file)
         self.audio_file = Path(audio_file)
         self.match_threshold_ms = match_threshold_ms
         self.onset_threshold = onset_threshold
+        self.audio_bpm = audio_bpm
+        self.midi_bpm = midi_bpm
         
         # Will be populated by analyze()
         self.midi_onsets = []
@@ -56,44 +62,97 @@ class PlayAlongComparator:
         self.results = {}
     
     def detect_audio_onsets(self) -> np.ndarray:
-        """Detect drum hit timings from audio file.
+        """Detect drum hit timings from audio file using multi-band approach.
         
         Returns:
             Array of onset times in seconds
         """
         print(f"Loading audio: {self.audio_file}")
         
-        # Load audio file
-        y, sr = librosa.load(str(self.audio_file), sr=None)
+        # Load audio file at 22050 Hz (good for drum detection)
+        y, sr = librosa.load(str(self.audio_file), sr=22050)
         
         print(f"Detecting onsets (sample rate: {sr} Hz)...")
+        print(f"Audio duration: {len(y)/sr:.1f}s")
         
-        # Use onset strength detection optimized for drums
-        # This combines energy and spectral information
-        onset_env = librosa.onset.onset_strength(
-            y=y, sr=sr, aggregate=np.median
+        # Step 1: Isolate percussive component (removes tonal instruments)
+        y_harmonic, y_percussive = librosa.effects.hpss(y, margin=2.0)
+        
+        # Step 2: Multi-band onset detection
+        # Different drums have energy in different frequency bands:
+        # - Kick/Bass: 20-150 Hz
+        # - Snare: 150-500 Hz + 2-5 kHz
+        # - Hi-hat/Cymbals: 5-15 kHz
+        
+        all_onsets = set()
+        
+        # Method 1: Percussive component with low threshold
+        onset_env_perc = librosa.onset.onset_strength(
+            y=y_percussive, sr=sr, aggregate=np.median
         )
-        
-        # Detect onset peaks
-        onsets_frames = librosa.onset.onset_detect(
-            onset_envelope=onset_env,
+        onsets_perc = librosa.onset.onset_detect(
+            onset_envelope=onset_env_perc,
             sr=sr,
-            units='frames',
+            units='time',
             backtrack=True,
-            pre_max=3,
-            post_max=3,
-            pre_avg=3,
-            post_avg=5,
-            delta=self.onset_threshold,
-            wait=10  # Minimum gap between onsets (100ms at default hop)
+            delta=self.onset_threshold * 0.3  # Lower threshold for percussive
         )
+        all_onsets.update(onsets_perc)
+        print(f"  Percussive method: {len(onsets_perc)} onsets")
         
-        # Convert frames to seconds
-        onsets_seconds = librosa.frames_to_time(
-            onsets_frames, sr=sr, hop_length=512
+        # Method 2: Low-frequency band (kick drum)
+        y_lowpass = librosa.effects.preemphasis(y_percussive, coef=-0.97)  # Enhance bass
+        onset_env_low = librosa.onset.onset_strength(
+            y=y_lowpass, sr=sr, fmax=300
         )
+        onsets_low = librosa.onset.onset_detect(
+            onset_envelope=onset_env_low,
+            sr=sr,
+            units='time',
+            backtrack=True,
+            delta=self.onset_threshold * 0.4
+        )
+        all_onsets.update(onsets_low)
+        print(f"  Low-freq method (kick): {len(onsets_low)} onsets")
         
-        print(f"Detected {len(onsets_seconds)} onsets in audio")
+        # Method 3: High-frequency band (hi-hat, cymbals)
+        y_highpass = y_percussive.copy()
+        onset_env_high = librosa.onset.onset_strength(
+            y=y_highpass, sr=sr, fmin=4000
+        )
+        onsets_high = librosa.onset.onset_detect(
+            onset_envelope=onset_env_high,
+            sr=sr,
+            units='time',
+            backtrack=True,
+            delta=self.onset_threshold * 0.5
+        )
+        all_onsets.update(onsets_high)
+        print(f"  High-freq method (hats): {len(onsets_high)} onsets")
+        
+        # Merge all detections and remove duplicates within 25ms
+        onsets_merged = sorted(all_onsets)
+        onsets_deduped = []
+        for onset in onsets_merged:
+            if not onsets_deduped or (onset - onsets_deduped[-1]) > 0.025:
+                onsets_deduped.append(onset)
+        
+        onsets_seconds = np.array(onsets_deduped)
+        
+        print(f"Detected {len(onsets_seconds)} total onsets after merging")
+        
+        if len(onsets_seconds) > 0:
+            print(f"  First onset: {onsets_seconds[0]:.2f}s")
+            print(f"  Last onset: {onsets_seconds[-1]:.2f}s")
+            print(f"  Density: {len(onsets_seconds) / (onsets_seconds[-1] - onsets_seconds[0]):.2f} hits/sec")
+        
+        # If we know both tempos, time-stretch the onset times to match MIDI tempo
+        if self.audio_bpm and self.midi_bpm and abs(self.audio_bpm - self.midi_bpm) > 0.5:
+            stretch_ratio = self.midi_bpm / self.audio_bpm
+            print(f"\n⚡ Tempo correction: Stretching audio {self.audio_bpm:.1f} BPM → {self.midi_bpm:.1f} BPM")
+            print(f"   Stretch ratio: {stretch_ratio:.4f}x")
+            onsets_seconds = onsets_seconds * stretch_ratio
+            print(f"   New duration: {onsets_seconds[-1]:.1f}s (was {onsets_seconds[-1]/stretch_ratio:.1f}s)")
         
         return onsets_seconds
     
@@ -121,11 +180,17 @@ class PlayAlongComparator:
         midi_onsets: np.ndarray,
         audio_onsets: np.ndarray
     ) -> Tuple[np.ndarray, float, float]:
-        """Align MIDI timeline to audio timeline.
+        """Align MIDI timeline to audio timeline using iterative refinement.
+        
+        Strategy:
+        1. Coarse alignment: Find initial offset using first 5-10 hits
+        2. Fine-tune: Refine tempo ratio using broader range
+        3. Validate: Check alignment quality
         
         Handles:
         - Time offset (MIDI starts before/after audio)
         - Tempo drift (slight BPM differences)
+        - MIDI files with long silence at start
         
         Args:
             midi_onsets: MIDI hit times
@@ -134,55 +199,108 @@ class PlayAlongComparator:
         Returns:
             Tuple of (aligned_midi_onsets, time_offset, tempo_ratio)
         """
-        print("Aligning MIDI to audio timeline...")
+        print("\nAligning MIDI to audio timeline...")
+        print(f"  MIDI: {len(midi_onsets)} hits, range {midi_onsets[0]:.1f}s - {midi_onsets[-1]:.1f}s")
+        print(f"  Audio: {len(audio_onsets)} onsets, range {audio_onsets[0]:.1f}s - {audio_onsets[-1]:.1f}s")
         
-        # Use first 20 onsets for alignment (more robust than using all)
-        n_align = min(20, len(midi_onsets), len(audio_onsets))
-        
-        if n_align < 5:
+        if len(midi_onsets) < 5 or len(audio_onsets) < 5:
             print("Warning: Too few onsets for reliable alignment")
             return midi_onsets, 0.0, 1.0
         
-        # Try multiple offset/tempo combinations and pick best match
+        # Step 1: Coarse alignment using first 5-10 hits
+        # This finds the rough offset without worrying about tempo
+        n_initial = min(10, len(midi_onsets), len(audio_onsets))
+        
+        midi_start = midi_onsets[0]
+        audio_start = audio_onsets[0]
+        
+        # Calculate inter-onset intervals (IOIs) for pattern matching
+        midi_iois = np.diff(midi_onsets[:n_initial])
+        
+        best_initial_score = float('inf')
+        best_initial_offset = -midi_start  # Default: align first hit with t=0
+        
+        # Search for best matching position in audio
+        # Try aligning MIDI start with each audio onset in first 30 seconds
+        search_window = min(100, len(audio_onsets))
+        
+        for audio_idx in range(search_window):
+            # Calculate offset to align MIDI[0] with audio[audio_idx]
+            offset = audio_onsets[audio_idx] - midi_start
+            
+            # Transform first N MIDI onsets
+            transformed = midi_onsets[:n_initial] + offset
+            
+            # Check if these fall within audio range
+            if transformed[0] < audio_onsets[0] - 5 or transformed[-1] > audio_onsets[-1] + 5:
+                continue
+            
+            # Find nearest audio onset for each transformed MIDI hit
+            distances = []
+            for t in transformed:
+                nearest_idx = np.searchsorted(audio_onsets, t)
+                # Check both neighbors
+                candidates = []
+                if nearest_idx > 0:
+                    candidates.append(abs(audio_onsets[nearest_idx - 1] - t))
+                if nearest_idx < len(audio_onsets):
+                    candidates.append(abs(audio_onsets[nearest_idx] - t))
+                if candidates:
+                    distances.append(min(candidates))
+            
+            if distances:
+                score = np.mean(distances)
+                if score < best_initial_score:
+                    best_initial_score = score
+                    best_initial_offset = offset
+        
+        print(f"  Coarse alignment: offset={best_initial_offset:.2f}s, avg_error={best_initial_score*1000:.1f}ms")
+        
+        # Step 2: Fine-tune tempo ratio around offset
+        # Use more hits for tempo estimation
+        n_refine = min(50, len(midi_onsets), len(audio_onsets))
+        
         best_score = float('inf')
-        best_offset = 0.0
+        best_offset = best_initial_offset
         best_tempo_ratio = 1.0
         
-        # Estimate rough offset based on where MIDI starts vs audio length
-        midi_start = midi_onsets[0] if len(midi_onsets) > 0 else 0
-        audio_end = audio_onsets[-1] if len(audio_onsets) > 0 else 0
-        
-        # If MIDI starts very late, adjust search range
-        if midi_start > audio_end:
-            # MIDI starts after audio ends - need large negative offset
-            offset_range = np.linspace(-midi_start - 10, -midi_start + audio_end + 10, 50)
-        else:
-            # Normal case - search reasonable range
-            offset_range = np.linspace(-10, 10, 50)
-        
-        # Search for time offset
-        for offset in offset_range:
-            # Search for tempo ratio
-            for tempo_ratio in np.linspace(0.95, 1.05, 20):
+        # Search tempo ratios (wider range to handle pitch/tempo shifted audio)
+        for tempo_ratio in np.linspace(0.90, 1.10, 40):
+            # Search small offset adjustments
+            for offset_adjust in np.linspace(-3, 3, 25):
+                offset = best_initial_offset + offset_adjust
+                
                 # Transform MIDI onsets
-                transformed = (midi_onsets[:n_align] * tempo_ratio) + offset
+                transformed = (midi_onsets[:n_refine] * tempo_ratio) + offset
                 
                 # Calculate distance to nearest audio onset
-                distances = np.abs(
-                    transformed[:, np.newaxis] - audio_onsets[np.newaxis, :n_align]
-                )
-                min_distances = np.min(distances, axis=1)
-                score = np.sum(min_distances)
+                distances = []
+                for t in transformed:
+                    nearest_idx = np.searchsorted(audio_onsets, t)
+                    candidates = []
+                    if nearest_idx > 0:
+                        candidates.append(abs(audio_onsets[nearest_idx - 1] - t))
+                    if nearest_idx < len(audio_onsets):
+                        candidates.append(abs(audio_onsets[nearest_idx] - t))
+                    if candidates:
+                        distances.append(min(candidates))
                 
-                if score < best_score:
-                    best_score = score
-                    best_offset = offset
-                    best_tempo_ratio = tempo_ratio
+                if distances:
+                    score = np.mean(distances)
+                    if score < best_score:
+                        best_score = score
+                        best_offset = offset
+                        best_tempo_ratio = tempo_ratio
         
         # Apply best alignment to all MIDI onsets
         aligned = (midi_onsets * best_tempo_ratio) + best_offset
         
-        print(f"Alignment: offset={best_offset:.3f}s, tempo_ratio={best_tempo_ratio:.4f}")
+        print(f"  Final alignment: offset={best_offset:.2f}s, tempo_ratio={best_tempo_ratio:.4f}")
+        print(f"  Alignment quality: avg_error={best_score*1000:.1f}ms")
+        
+        # Validation: check if alignment makes sense
+        if aligned[0] < audio_onsets[0] - 10 or aligned[0] > audio_onsets[-1] + 10:
+            print("  WARNING: Aligned MIDI is outside audio range - alignment may be poor")
         
         return aligned, best_offset, best_tempo_ratio
     
@@ -388,18 +506,31 @@ class PlayAlongComparator:
         print("="*60 + "\n")
 
 
-def compare_playalong(midi_file: str, audio_file: str, threshold_ms: float = 50.0) -> Dict:
+def compare_playalong(
+    midi_file: str,
+    audio_file: str,
+    threshold_ms: float = 50.0,
+    onset_threshold: float = 0.3,
+    audio_bpm: Optional[float] = None,
+    midi_bpm: Optional[float] = None
+) -> Dict:
     """Convenience function to compare MIDI performance to audio reference.
     
     Args:
         midi_file: Path to MIDI drum performance
         audio_file: Path to reference audio drum track
         threshold_ms: Match threshold in milliseconds
+        onset_threshold: Onset detection sensitivity (0-1, higher=less sensitive)
+        audio_bpm: Original BPM of audio (auto-detected if None)
+        midi_bpm: BPM of MIDI recording (extracted from file if None)
         
     Returns:
         Dictionary with comparison results
     """
-    comparator = PlayAlongComparator(midi_file, audio_file, threshold_ms)
+    comparator = PlayAlongComparator(
+        midi_file, audio_file, threshold_ms, onset_threshold,
+        audio_bpm, midi_bpm
+    )
     results = comparator.analyze()
     comparator.print_report()
     return results

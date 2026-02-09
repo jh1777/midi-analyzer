@@ -69,6 +69,20 @@ Match Threshold:
         help='Onset detection sensitivity 0-1 (default: 0.3, higher=less sensitive)'
     )
     
+    parser.add_argument(
+        '--audio-bpm',
+        type=float,
+        default=None,
+        help='Original BPM of audio file (auto-detected if not specified)'
+    )
+    
+    parser.add_argument(
+        '--midi-bpm',
+        type=float,
+        default=None,
+        help='BPM of MIDI recording (extracted from file if not specified)'
+    )
+    
     args = parser.parse_args()
     
     # Validate files exist
@@ -88,7 +102,10 @@ Match Threshold:
         compare_playalong(
             str(midi_path),
             str(audio_path),
-            threshold_ms=args.threshold
+            threshold_ms=args.threshold,
+            onset_threshold=args.onset_threshold,
+            audio_bpm=args.audio_bpm,
+            midi_bpm=args.midi_bpm
         )
     except Exception as e:
         print(f"\nError during analysis: {e}")

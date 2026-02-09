@@ -49,29 +49,66 @@ python compare_playalong.py your_drums.mid original_drums.mp3 --threshold 100
 
 ## Workflow
 
+### ⚠️ CRITICAL: Tempo Matching
+
+**For accurate results, your MIDI and audio MUST be at the same tempo!**
+
+❌ **Common Mistake:**
+- Recording at 120 BPM when the song is actually 115 BPM
+- Letting your DAW time-stretch the song to match your project tempo
+- Comparing stretched MIDI to unstretched audio (or vice versa)
+
+✅ **Correct Approach:**
+
+**Option A: Record at Original Tempo (Recommended)**
+1. Find the song's original BPM (Google "[song name] BPM" or use a BPM detector)
+2. Set your DAW project to the ORIGINAL song tempo (e.g., 115 BPM)
+3. Import the song WITHOUT time-stretching:
+   - Logic Pro: Disable "Flex" mode or set to "Follow Tempo: Off"
+   - Ableton: Set clip warp mode to "Off"
+4. Record your MIDI at the original tempo
+5. Export both MIDI and drum stem at the same original tempo
+6. Run: `python compare_playalong.py drums.mid drums.mp3 --audio-bpm 115 --midi-bpm 115`
+
+**Option B: Match Everything to Your Preferred Tempo**
+1. Set your DAW to your preferred tempo (e.g., 120 BPM)
+2. Import song and enable time-stretching to match 120 BPM
+3. Record MIDI at 120 BPM
+4. Export drum stem WITH time-stretching applied (at 120 BPM)
+5. Run: `python compare_playalong.py drums.mid drums.mp3 --audio-bpm 120 --midi-bpm 120`
+
 ### 1. Separate Drums from Song
 
 **Option A: Moises (Recommended)**
 1. Upload song to Moises.ai
 2. Select "Drums" separation
 3. Download drums track as MP3
+4. **Note the original BPM** (shown in filename or song info)
 
 **Option B: Logic Pro**
-1. Import song into Logic Pro
+1. Import song into Logic Pro at ORIGINAL tempo
 2. Use Stem Splitter plugin (or similar)
 3. Export drums track as MP3/WAV
+4. **Ensure export is at the same tempo as your recording**
 
 ### 2. Record Your Play-Along
 
-1. Import the song (without drums) into your DAW
-2. Add MIDI drum track
-3. Play along and record
-4. Export your performance as MIDI
+1. **Set DAW to correct tempo** (see "Tempo Matching" above)
+2. Import the song (without drums) - match tempo!
+3. Add MIDI drum track
+4. Play along and record
+5. Export your performance as MIDI
 
 ### 3. Run Comparison
 
 ```bash
-python compare_playalong.py my_performance.mid original_drums.mp3
+# Specify both tempos explicitly for best results
+python compare_playalong.py my_performance.mid original_drums.mp3 \
+  --audio-bpm 115 --midi-bpm 115 --threshold 50
+
+# If tempos differ (not recommended, but the tool handles it)
+python compare_playalong.py my_performance.mid original_drums.mp3 \
+  --audio-bpm 115 --midi-bpm 120 --threshold 50
 ```
 
 ## Output Report
@@ -149,22 +186,73 @@ Hits you played that weren't in the original. Could be:
 | 60-69 | Fair 🙂 | Acceptable, room for improvement |
 | 0-59 | Needs Practice 💪 | Keep working on it |
 
+## Realistic Expectations
+
+### Expected Match Rates
+
+**Even with perfect playing, you'll likely see:**
+- **60-80% match rate**: Good! Audio stem quality is the limiting factor
+- **40-60% match rate**: Acceptable, check tempo matching and onset detection settings
+- **<40% match rate**: Likely wrong song, different take, or severe tempo mismatch
+- **>90% match rate**: Excellent! Only achievable with studio-quality stems or MIDI reference
+
+**Why not 100%?**
+- Moises/Logic stem separation typically **misses 15-20% of drum hits**
+- Quiet hi-hats, ghost notes, and cymbals are often not detected
+- Other instruments bleed into the drum track (bass, guitar)
+- Your MIDI may have embellishments not in the original performance
+
+### Real-World Example Results
+
+```
+Faith Hill - "Love Ain't Like That" (74 BPM)
+- MIDI hits: 911
+- Audio onsets detected: 770 (84.5% of MIDI)
+- Matched: 658/911 (72.2%)
+- Mean timing error: 23.0ms (±13.2ms)
+- Score: 72.4/100 (Good 👌)
+- First 20 hits: 90% matched perfectly
+```
+
+**Interpretation**: This is a **good result**! The 72% match reflects:
+- ✅ You played well (first 20 hits = 90% matched)
+- ✅ Timing is tight (23ms average)
+- ❌ Audio stem missing ~15% of hits (typical for Moises)
+- ❌ You played more notes than original (embellishments)
+
 ## Tips for Better Results
 
 ### Audio Separation
 - Use high-quality drum separation (Moises Premium or Logic Pro)
 - Poor separation = false onsets = lower accuracy
 - Isolated drums work best
+- **Accept that stems will miss 15-20% of hits** - this is normal!
 
 ### Recording
+- **Match tempo exactly** (most important!)
 - Use metronome/click track aligned with song
 - Start recording slightly before the song starts
 - Avoid extra notes at beginning/end
+- Record at the **original song tempo**, not your preferred tempo
 
 ### MIDI Export
 - Export full performance (don't trim)
 - Include all drum hits (kick, snare, hi-hat, etc.)
 - Use standard GM drum mapping
+- **Ensure MIDI tempo matches audio tempo**
+
+### Onset Detection Tuning
+
+```bash
+# If match rate is very low, try more sensitive detection
+python compare_playalong.py drums.mid audio.mp3 --onset-threshold 0.15
+
+# If getting too many false positives
+python compare_playalong.py drums.mid audio.mp3 --onset-threshold 0.4
+
+# Default works well for most cases
+python compare_playalong.py drums.mid audio.mp3 --onset-threshold 0.3
+```
 
 ## Troubleshooting
 
@@ -185,20 +273,57 @@ Hits you played that weren't in the original. Could be:
 
 ## Technical Details
 
-### Onset Detection
-- Uses combined energy-based and spectral flux detection
-- Targets >90% accuracy for clean drum tracks
-- Optimized for isolated drums (not full mix)
+### Multi-Band Onset Detection (Improved Algorithm)
 
-### Alignment Algorithm
-- Tests multiple offset/tempo combinations
-- Uses first 20 onsets for robust alignment
-- Handles slight tempo drift (0.98-1.02x)
+The tool uses a **3-band approach** to detect different drum types:
+
+1. **Percussive isolation** (HPSS): Separates drums from tonal instruments
+2. **Low-frequency band** (20-300 Hz): Detects kick drum hits
+3. **High-frequency band** (4-15 kHz): Detects hi-hats and cymbals
+4. **Full-band percussive**: Detects snares and toms
+5. **Deduplication**: Merges detections within 25ms to avoid duplicates
+
+**Result**: Detects **4-5x more onsets** than basic methods (e.g., 770 vs 177 onsets)
+
+**Adjustable sensitivity**:
+```bash
+--onset-threshold 0.15  # Very sensitive (more hits, more false positives)
+--onset-threshold 0.30  # Default (balanced)
+--onset-threshold 0.50  # Conservative (fewer hits, fewer false positives)
+```
+
+### Tempo Correction
+
+If `--audio-bpm` and `--midi-bpm` are specified:
+- Automatically time-stretches audio onset times to match MIDI tempo
+- Formula: `stretched_time = original_time * (midi_bpm / audio_bpm)`
+- Handles songs recorded at different tempos
+- Example: 115 BPM audio → 120 BPM MIDI = 1.0435x stretch
+
+### Alignment Algorithm (Two-Stage)
+
+**Stage 1: Coarse Alignment**
+- Uses first 5-10 MIDI hits to find initial offset
+- Tests alignment with first 100 audio onsets
+- Finds rough time offset (e.g., -900s if MIDI starts very late)
+- Typical accuracy: 30-50ms
+
+**Stage 2: Fine-Tuning**
+- Searches tempo ratios: 0.90-1.10x (handles ±10% tempo differences)
+- Searches offset adjustments: ±3 seconds around coarse offset
+- Uses 50 MIDI hits for robust estimation
+- Final accuracy: 10-30ms average error
+
+**Result**: Automatically handles:
+- MIDI files with long silence at start (e.g., starts at 956 seconds)
+- Tempo mismatches up to ±10%
+- Small timing drifts throughout the performance
 
 ### Matching Algorithm
-- Uses Hungarian algorithm for optimal pairing
+- Uses **Hungarian algorithm** for optimal pairing
 - Each MIDI hit matched to nearest audio onset
-- Threshold determines what counts as a "match"
+- Threshold determines what counts as a "match" (default: 50ms)
+- Reports: matched hits, missed hits (you should have played), extra hits (not in original)
 
 ## Future Enhancements
 

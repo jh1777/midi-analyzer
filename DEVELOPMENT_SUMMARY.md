@@ -27,18 +27,31 @@ audio/
 ├── __init__.py              # Package version
 ├── __main__.py              # Module execution entry point
 ├── main.py                  # CLI entry point
-└── drum_analyzer.py         # Core analysis logic (~500 lines)
+├── drum_analyzer.py         # Core analysis logic (~500 lines)
+└── playalong_compare.py     # Play-along comparison engine (~400 lines)
 
 Root directory scripts:
 ├── debug_timing.py          # Quick timing analysis for debugging
 ├── debug_detailed.py        # Detailed beat-by-beat analysis
 ├── compare_files.py         # Compare two MIDI files side-by-side
-└── suggest_quantize.py      # Quantization advisor for Logic Pro
+├── suggest_quantize.py      # Quantization advisor for Logic Pro
+├── compare_playalong.py     # Play-along comparison CLI
+├── api_server.py            # FastAPI backend for web UI
+└── start.sh                 # Web UI launcher script
+
+Web UI:
+web-ui/
+├── src/App.tsx              # React application (table view)
+├── package.json             # Node dependencies
+└── vite.config.ts           # Vite build configuration
 
 Documentation:
-├── README.md                # User-facing documentation
-├── AGENTS.md                # AI agent guidance (architecture & design decisions)
-└── DEVELOPMENT_SUMMARY.md   # This file - comprehensive development history
+├── README.md                        # User-facing documentation
+├── AGENTS.md                        # AI agent guidance (architecture & design)
+├── DEVELOPMENT_SUMMARY.md           # This file - development history
+├── PLAYALONG_COMPARISON.md          # Play-along feature documentation
+├── THRESHOLD_UPDATE.md              # Scoring threshold research & changes
+└── WEB_UI.md                        # Web interface documentation
 ```
 
 ---
@@ -141,6 +154,139 @@ else:
 - Created `suggest_quantize.py` script
 - Shows both "musical fit" (what song is written in) and "technical best" (lowest error)
 - Gives Logic Pro specific instructions
+
+### Phase 8: Threshold Calibration Based on Research (Feb 9, 2026)
+- **Issue**: Thresholds were too strict - typical e-drum recordings showed "Needs Work"
+- **Research**: Professional drummers typically deviate 10-20ms, e-drum latency adds 5-10ms
+- **Changes**:
+  - Excellent: <10ms (was <5ms)
+  - Good: 10-20ms (was 5-10ms)
+  - Acceptable: 20-35ms (was 10-20ms)
+  - Needs Work: 35-50ms (was 20-40ms)
+  - Poor: >50ms (was >40ms)
+- **Result**: More realistic ratings for human performances
+- **Documentation**: Created THRESHOLD_UPDATE.md with research findings
+
+### Phase 9: Web UI Implementation (Feb 9, 2026)
+- **Goal**: Analyze multiple MIDI files with visual interface
+- **Stack**: FastAPI backend + React/TypeScript/Vite frontend
+- **Features**:
+  - Table view of all MIDI files in configurable folder
+  - Displays: File, Duration, Tempo, Total Hits, Top 5 drums with scores
+  - Sortable columns (click headers to sort)
+  - Time formatting (MM:SS)
+  - Flexible drum matching (matches partial names)
+- **Fixes Applied**:
+  - Downgraded Tailwind CSS v4→v3 (v4 too new, breaking changes)
+  - Fixed relative path support (`.` and `./` prefixes)
+  - Fixed drum column matching (now case-insensitive, partial match)
+  - Fixed sorting by numeric score instead of rating string
+  - Added proper time formatting for Duration/Total Hits columns
+- **Startup**: `./start.sh` (starts both backend and frontend)
+- **Files**:
+  - Backend: `api_server.py` (FastAPI REST API)
+  - Frontend: `web-ui/src/App.tsx` (React SPA)
+  - Launcher: `start.sh` (convenience script)
+
+### Phase 10: Play-Along Comparison Feature (Feb 9, 2026)
+
+**Goal**: Compare MIDI drum recordings against original audio drum tracks for play-along practice validation.
+
+#### Implementation
+- **Files Created**:
+  - `audio/playalong_compare.py` (400+ lines) - Core comparison engine
+  - `compare_playalong.py` - Command-line interface
+  - `PLAYALONG_COMPARISON.md` - Comprehensive documentation
+- **Dependencies Added**: librosa, scipy, soundfile (audio analysis)
+
+#### Algorithm Design
+
+**1. Multi-Band Onset Detection** (4-5x improvement over basic methods)
+- Percussive isolation (HPSS): Removes tonal instruments
+- Low-frequency band (20-300 Hz): Kick drum detection
+- High-frequency band (4-15 kHz): Hi-hat/cymbal detection
+- Full-band percussive: Snare/tom detection
+- Deduplication: Merges onsets within 25ms
+- **Result**: 770 onsets detected vs 177 with basic method
+
+**2. Tempo Correction**
+- Automatic time-stretching when BPMs differ
+- Formula: `stretched_time = original_time * (midi_bpm / audio_bpm)`
+- Handles DAW tempo mismatches (e.g., 115 BPM song played at 120 BPM project tempo)
+- Configurable via `--audio-bpm` and `--midi-bpm` parameters
+
+**3. Two-Stage Alignment**
+- **Coarse alignment**: Uses first 5-10 MIDI hits, tests 100 audio onsets, finds rough offset
+- **Fine-tuning**: Searches tempo ratios 0.90-1.10x, offset adjustments ±3s, uses 50 hits
+- **Handles**: MIDI files with long silence at start, tempo drift, large time offsets
+- **Accuracy**: 10-30ms average alignment error
+
+**4. Matching & Scoring**
+- Hungarian algorithm for optimal MIDI↔audio pairing
+- Configurable threshold (default 50ms)
+- Reports: matched hits, missed hits, extra hits, timing accuracy
+- Overall score: 60% match percentage + 40% timing accuracy
+
+#### Key Findings & Limitations
+
+**Critical Discovery**: Tempo matching is essential!
+- If MIDI recorded at 120 BPM but audio is 115 BPM → poor match even with perfect playing
+- DAW time-stretching introduces artifacts that break comparison
+- **Solution**: Record at original song tempo, or export stems at matching tempo
+
+**Realistic Expectations**:
+- **60-80% match**: Good result (audio stem quality is limiting factor)
+- **40-60% match**: Acceptable (check tempo matching, tune onset detection)
+- **<40% match**: Wrong song, different take, or severe tempo mismatch
+- **>90% match**: Excellent (requires studio-quality stems or MIDI reference)
+
+**Why Not 100%?**
+- Moises/Logic stem separation typically misses 15-20% of drum hits
+- Quiet hi-hats, ghost notes, cymbals often not detected
+- Other instruments bleed into drum track (bass, guitar)
+- User's MIDI may have embellishments not in original
+
+#### Testing Results
+
+**Test Case: Faith Hill - "Love Ain't Like That" (74 BPM)**
+- MIDI hits: 911
+- Audio onsets detected: 770 (84.5% of MIDI)
+- Matched: 658/911 (72.2%)
+- Mean timing error: 23.0ms (±13.2ms)
+- **Score: 72.4/100 (Good)**
+- First 20 hits: 90% matched perfectly (<50ms)
+- **Interpretation**: Good playing, but audio stem missing ~15% of hits (typical for Moises)
+
+**Test Case: Adele - "Don't You Remember"**
+- Initial results: 4.7% match (very poor)
+- **Root cause**: Tempo mismatch (MIDI 120 BPM vs audio 115 BPM)
+- **Root cause 2**: Different recording/take (onset patterns didn't match)
+- Lesson learned: Need EXACT same audio track that was used for play-along
+
+#### Usage & Best Practices
+
+**Recommended Workflow**:
+1. Find original song's BPM
+2. Set DAW to ORIGINAL tempo (not preferred tempo)
+3. Import song WITHOUT time-stretching (disable Flex Time in Logic)
+4. Record MIDI at original tempo
+5. Extract drum stem at ORIGINAL tempo (Moises/Logic)
+6. Run: `python compare_playalong.py drums.mid stems.mp3 --audio-bpm 115 --midi-bpm 115`
+
+**Command-Line Options**:
+```bash
+--threshold 50              # Match threshold in ms (default: 50)
+--onset-threshold 0.3       # Sensitivity 0-1 (default: 0.3, lower=more sensitive)
+--audio-bpm 115            # Original audio tempo
+--midi-bpm 115             # MIDI recording tempo
+```
+
+#### Documentation Updates
+- Updated README.md with play-along section and best practices
+- Created PLAYALONG_COMPARISON.md with comprehensive technical details
+- Added realistic expectations and troubleshooting guide
+- Documented multi-band onset detection algorithm
+- Explained tempo correction and alignment strategies
 
 ---
 

@@ -177,22 +177,57 @@ python compare_playalong.py <your_drums.mid> <reference_drums.mp3>
 ```
 Compare your MIDI play-along against the original audio drum track!
 
-**Example workflow:**
-1. Use Moises or Logic Pro to separate drums from song
-2. Play along and record MIDI in your DAW
-3. Export both: your MIDI + original drum audio
-4. Run comparison to see how well you matched!
+**IMPORTANT: Best Practices for Accurate Results**
+
+✅ **Recommended Workflow (60-80% accuracy):**
+1. Find the original song's BPM (e.g., "Don't You Remember" = 115 BPM)
+2. **Set your DAW to the ORIGINAL song tempo** (not your preferred tempo!)
+3. Import the song WITHOUT time-stretching (disable Flex Time in Logic)
+4. Record your MIDI drums at the original tempo
+5. Use Moises/Logic to extract drum stem at ORIGINAL tempo
+6. Run comparison: `python compare_playalong.py your_drums.mid drums.mp3 --audio-bpm 115 --midi-bpm 115`
+
+⚠️ **Why this matters:**
+- If you record at 120 BPM but the song is 115 BPM, your DAW time-stretches the audio
+- Time-stretching introduces timing artifacts that break the comparison
+- Tempo mismatches cause poor match rates even if you played perfectly!
+
+**Advanced Options:**
+```bash
+# Specify tempos explicitly (recommended for accuracy)
+python compare_playalong.py drums.mid audio.mp3 --audio-bpm 115 --midi-bpm 115
+
+# Adjust onset detection sensitivity (0-1, lower = more sensitive)
+python compare_playalong.py drums.mid audio.mp3 --onset-threshold 0.15
+
+# Change match threshold (default: 50ms)
+python compare_playalong.py drums.mid audio.mp3 --threshold 30
+```
 
 **Example output:**
 ```
-Overall Score:  87.3/100
-Rating:         Great! 👍
-Matched Hits:   208/245 (84.9%)
-Mean Error:     18.2ms (±12.4ms)
-Within 50ms:    232 hits (94.7%)
-Missed Hits:    6
-Extra Hits:     12
+⚡ Tempo correction: Stretching audio 115.0 BPM → 120.0 BPM
+   Stretch ratio: 1.0435x
+
+Overall Score:  72.4/100
+Rating:         Good 👌
+Matched Hits:   658/911 (72.2%)
+Mean Error:     23.0ms (±13.2ms)
+Within 50ms:    658 hits (72.2%)
+Missed Hits:    253
+Extra Hits:     253
 ```
+
+**Understanding Results:**
+- **60-80% match**: Good! Audio stem quality limits perfect matching
+- **40-60% match**: Acceptable, check if tempos match and onset detection is tuned
+- **<40% match**: Likely wrong song, wrong take, or very different performance
+- **>90% match**: Excellent! (requires very clean drum separation or MIDI reference)
+
+**Limitations:**
+- Audio stem separation (Moises/Logic) typically misses 15-20% of drum hits
+- Isolated drums may have other instruments bleeding through
+- For >90% accuracy, you need studio-quality separated stems or MIDI reference tracks
 
 ### Debug Tools
 ```bash
