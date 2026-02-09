@@ -47,7 +47,12 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Web UI
+web-ui/node_modules/
+web-ui/dist/
+web-ui/.vite/
 
+# MIDI files
 *.mid
 *.midi
 **/*.mid
