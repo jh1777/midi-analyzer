@@ -27,6 +27,8 @@ interface FileAnalysis {
   total_hits: number
   avg_timing_ms: number
   timing_tendency: string
+  consistency_ms: number
+  consistency_rating: string
   top_drums: DrumMetric[]
   error?: string
 }
@@ -181,6 +183,13 @@ function App() {
     if (sortColumn === 'avg_timing') {
       return [...files].sort((a, b) => {
         const diff = a.avg_timing_ms - b.avg_timing_ms
+        return sortDirection === 'asc' ? diff : -diff
+      })
+    }
+
+    if (sortColumn === 'consistency') {
+      return [...files].sort((a, b) => {
+        const diff = a.consistency_ms - b.consistency_ms
         return sortDirection === 'asc' ? diff : -diff
       })
     }
@@ -360,6 +369,24 @@ function App() {
                       Tendency
                     </span>
                   </TableHead>
+                  <TableHead className="text-center">
+                    <button
+                      onClick={() => handleSort('consistency')}
+                      className="flex items-center justify-center gap-1 hover:text-gray-900 transition-colors mx-auto"
+                      title="Timing consistency (standard deviation) - lower is tighter"
+                    >
+                      <span>Consistency</span>
+                      {sortColumn === 'consistency' ? (
+                        sortDirection === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
                   {DRUM_COLUMNS.map((drumCol) => (
                     <TableHead key={drumCol.display}>
                       <button
@@ -421,6 +448,23 @@ function App() {
                         }`}>
                           {file.timing_tendency}
                         </span>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {file.consistency_ms > 0 ? (
+                        <div className="flex flex-col">
+                          <span className={`text-sm font-semibold ${
+                            file.consistency_rating === 'Tight' ? 'text-green-600' :
+                            file.consistency_rating === 'Good' ? 'text-blue-600' :
+                            file.consistency_rating === 'Fair' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {file.consistency_rating}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            ±{file.consistency_ms}ms
+                          </span>
+                        </div>
                       ) : '-'}
                     </TableCell>
                     {DRUM_COLUMNS.map((drumCol) => {

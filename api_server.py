@@ -154,6 +154,27 @@ def analyze_file(file_path: str):
         else:
             timing_tendency = "Centered"
         
+        # Calculate timing consistency (weighted standard deviation)
+        # This shows how much timing varies (tightness)
+        total_variance_weighted = sum(
+            metrics['std_dev_ms'] ** 2 * metrics['hit_count']
+            for _, metrics in timing_quality.items()
+        )
+        weighted_std_dev = (total_variance_weighted / total_hits) ** 0.5 if total_hits > 0 else 0
+        consistency_ms = round(weighted_std_dev, 1)
+        
+        # Determine consistency rating
+        # Standard deviation shows how "tight" the timing is
+        # Low std = consistent, High std = inconsistent
+        if consistency_ms < 10:
+            consistency_rating = "Tight"
+        elif consistency_ms < 20:
+            consistency_rating = "Good"
+        elif consistency_ms < 30:
+            consistency_rating = "Fair"
+        else:
+            consistency_rating = "Loose"
+        
         return {
             "filename": Path(file_path).name,
             "path": file_path,
@@ -162,6 +183,8 @@ def analyze_file(file_path: str):
             "total_hits": analysis['total_beats'],
             "avg_timing_ms": avg_timing_ms,
             "timing_tendency": timing_tendency,
+            "consistency_ms": consistency_ms,
+            "consistency_rating": consistency_rating,
             "top_drums": top_drums
         }
         
@@ -227,6 +250,23 @@ def analyze_all_files():
             else:
                 timing_tendency = "Centered"
             
+            # Calculate consistency
+            total_variance_weighted = sum(
+                metrics['std_dev_ms'] ** 2 * metrics['hit_count']
+                for _, metrics in timing_quality.items()
+            )
+            weighted_std_dev = (total_variance_weighted / total_hits_calc) ** 0.5 if total_hits_calc > 0 else 0
+            consistency_ms = round(weighted_std_dev, 1)
+            
+            if consistency_ms < 10:
+                consistency_rating = "Tight"
+            elif consistency_ms < 20:
+                consistency_rating = "Good"
+            elif consistency_ms < 30:
+                consistency_rating = "Fair"
+            else:
+                consistency_rating = "Loose"
+            
             results.append({
                 "filename": file_path.name,
                 "path": relative_path,
@@ -235,6 +275,8 @@ def analyze_all_files():
                 "total_hits": analysis['total_beats'],
                 "avg_timing_ms": avg_timing_ms,
                 "timing_tendency": timing_tendency,
+                "consistency_ms": consistency_ms,
+                "consistency_rating": consistency_rating,
                 "top_drums": top_drums,
                 "error": None
             })
@@ -248,6 +290,8 @@ def analyze_all_files():
                 "total_hits": 0,
                 "avg_timing_ms": 0,
                 "timing_tendency": "-",
+                "consistency_ms": 0,
+                "consistency_rating": "-",
                 "top_drums": [],
                 "error": str(e)
             })
