@@ -26,6 +26,7 @@ interface FileAnalysis {
   tempo: number
   total_hits: number
   avg_timing_ms: number
+  timing_tendency: string
   top_drums: DrumMetric[]
   error?: string
 }
@@ -354,6 +355,11 @@ function App() {
                       )}
                     </button>
                   </TableHead>
+                  <TableHead className="text-center">
+                    <span title="Main timing tendency: early vs late">
+                      Tendency
+                    </span>
+                  </TableHead>
                   {DRUM_COLUMNS.map((drumCol) => (
                     <TableHead key={drumCol.display}>
                       <button
@@ -403,6 +409,17 @@ function App() {
                           'text-red-600'
                         }`}>
                           {file.avg_timing_ms}ms
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {file.timing_tendency ? (
+                        <span className={`text-sm font-medium ${
+                          file.timing_tendency.includes('Early') ? 'text-blue-600' :
+                          file.timing_tendency.includes('Late') ? 'text-orange-600' :
+                          'text-gray-600'
+                        }`}>
+                          {file.timing_tendency}
                         </span>
                       ) : '-'}
                     </TableCell>
