@@ -54,6 +54,7 @@ function App() {
   const [newFolder, setNewFolder] = useState('')
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
+  const [analysisMode, setAnalysisMode] = useState<'groove-aware' | 'grid-based'>('groove-aware')
 
   const formatDuration = (seconds: number): string => {
     if (seconds <= 0) return '-'
@@ -73,6 +74,7 @@ function App() {
       const data = await response.json()
       setMidiFolder(data.midi_folder)
       setNewFolder(data.midi_folder)
+      setAnalysisMode(data.analysis_mode || 'groove-aware')
     } catch (error) {
       console.error('Failed to fetch config:', error)
     }
@@ -98,6 +100,28 @@ function App() {
     } catch (error) {
       console.error('Failed to update config:', error)
       alert(error instanceof Error ? error.message : 'Failed to update folder path')
+    }
+  }
+
+  const updateAnalysisMode = async (mode: 'groove-aware' | 'grid-based') => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/config/analysis-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update analysis mode')
+      }
+      
+      setAnalysisMode(mode)
+      // Re-analyze all files with new mode
+      analyzeFiles()
+    } catch (error) {
+      console.error('Failed to update analysis mode:', error)
+      alert(error instanceof Error ? error.message : 'Failed to update analysis mode')
     }
   }
 
@@ -285,7 +309,49 @@ function App() {
             </div>
           </div>
 
-          <div className="flex justify-end">
+          {/* Analysis Mode Toggle */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Analysis Mode
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => updateAnalysisMode('groove-aware')}
+                disabled={loading}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                  analysisMode === 'groove-aware'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className="font-semibold mb-1">🎵 Groove-Aware</div>
+                <div className="text-xs">
+                  Measures consistency relative to your groove
+                </div>
+              </button>
+              <button
+                onClick={() => updateAnalysisMode('grid-based')}
+                disabled={loading}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                  analysisMode === 'grid-based'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className="font-semibold mb-1">📏 Grid-Based</div>
+                <div className="text-xs">
+                  Measures absolute distance from DAW grid
+                </div>
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              {analysisMode === 'groove-aware'
+                ? '✅ Eliminates constant offsets (e-drum latency, laid-back feel). Focuses on timing consistency.'
+                : '📐 Traditional analysis. Penalizes any offset from the grid.'}
+            </p>
+          </div>
+
+          <div className="flex justify-end mt-6">
             <Button
               onClick={analyzeFiles}
               disabled={loading}

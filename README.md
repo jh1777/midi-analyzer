@@ -6,7 +6,8 @@
 
 ✨ **Timing Analysis**: Measures how far each hit is from perfect timing (in milliseconds)  
 📊 **Scoring System**: 0-100 score per drum (Excellent/Good/Acceptable/Needs Work/Poor)  
-🎵 **Auto Grid Detection**: Tests multiple grids (16th, triplets, 8th, etc.) to find best fit  
+🎵 **Two Analysis Modes**: Grid-based (absolute timing) and Groove-aware (consistency)  
+🎸 **Auto Grid Detection**: Tests multiple grids (16th, triplets, 8th, etc.) to find best fit  
 🎯 **Quantization Advisor**: Suggests Logic Pro settings for best results  
 📈 **Progress Tracking**: Compare before/after quantization to see improvement
 
@@ -109,6 +110,44 @@ QUANTIZED:
   Snare:       0.10ms → Score 99.8 (Excellent) ✓
 ```
 
+## Analysis Modes
+
+### Grid-Based Analysis (Default)
+
+Measures **absolute timing** - how close each hit is to a perfect quantized grid.
+
+**Best for:**
+- Validating quantized MIDI files
+- Comparing before/after quantization
+- Studio work requiring strict tempo adherence
+- Click track practice and timing drills
+
+**Example**: If your kick drum hits 30ms after the grid, you get 30ms error.
+
+### Groove-Aware Analysis
+
+Measures **timing consistency** - how consistently you maintain your groove, even if it's slightly ahead/behind the grid.
+
+**Best for:**
+- Evaluating real human performances
+- Identifying true timing problems vs. intentional feel
+- Analyzing laid-back or pushed grooves
+- Understanding timing stability
+
+**Example**: If all your kicks are 30ms late but consistent (±5ms variation), you get a high score because your groove is stable.
+
+**Key Difference**: Grid-based penalizes any offset from the grid. Groove-aware first detects your natural groove offset, then measures consistency around that groove.
+
+### Switching Modes
+
+**In Web UI**: Click the 🎵 Groove-Aware or 📏 Grid-Based button at the top. This re-analyzes all files.
+
+**In CLI**: Use the `--mode` flag:
+```bash
+python -m audio your_drums.mid --mode groove-aware
+python -m audio your_drums.mid --mode grid-based
+```
+
 ## Understanding the Scores
 
 | Score | Rating | Avg Error | What It Means |
@@ -197,10 +236,31 @@ python debug_detailed.py      # Beat-by-beat analysis
 
 ## Technical Details
 
-- Uses **grid-based quantization** - each hit compared to nearest grid position
+### Grid-Based Analysis
+- Each hit compared to nearest grid position
 - **Modulo-based** positioning handles files starting at any beat
 - **Tempo map tracking** across all MIDI tracks
 - Sub-millisecond precision for validation
+
+### Groove-Aware Analysis
+- Detects your natural groove offset using 8-16 stable hits from the middle of the performance
+- Uses **median** for outlier resistance (skips first/last 10% of song)
+- Measures consistency with **IQR** (interquartile range) - robust statistic
+- Identifies outliers using Tukey's fences (hits >1.5×IQR from groove)
+- Priority drums: Bass Drum 1 > Acoustic Snare > Closed Hi-Hat (most stable)
+
+**Algorithm**:
+1. Find most consistent drum type (lowest IQR, 16+ hits required)
+2. Extract middle stable region (skip intros/outros)
+3. Calculate median offset from grid (your groove)
+4. Subtract groove offset from all hits
+5. Measure consistency (IQR) and score based on tightness
+
+**Metrics**:
+- **Groove Offset**: How far your natural groove is from the grid (±ms)
+- **IQR**: Interquartile range showing timing consistency (lower = tighter)
+- **Outlier %**: Percentage of hits significantly outside your groove
+- **Consistency Rating**: Tight (<10ms IQR), Good (<20ms), Fair (<30ms), Loose (≥30ms)
 
 ## Troubleshooting
 
@@ -239,6 +299,7 @@ ruff check audio/
 
 - **README.md** (this file) - User guide
 - **WEB_UI.md** - Web interface documentation
+- **GROOVE_AWARE_ANALYSIS.md** - Technical details on groove-aware analysis
 - **AGENTS.md** - Architecture and design decisions
 - **DEVELOPMENT_SUMMARY.md** - Complete development history
 

@@ -142,6 +142,54 @@ else:
 - Shows both "musical fit" (what song is written in) and "technical best" (lowest error)
 - Gives Logic Pro specific instructions
 
+### Phase 8: Web UI Implementation
+- Created FastAPI backend (`api_server.py`)
+- Created React + TypeScript frontend (`web-ui/`)
+- Features: sortable table, file analysis, configuration
+- Startup script: `start.sh` for easy launching
+
+### Phase 9: Play-Along Comparison Feature
+- Implemented audio-to-MIDI comparison (`audio/playalong_compare.py`)
+- Multi-band onset detection (percussive, low-freq, high-freq)
+- Tempo correction and two-stage alignment
+- CLI tool: `compare_playalong.py`
+- Dependencies: librosa, scipy
+- Real-world match rates: 60-80% (limited by audio stem quality)
+
+### Phase 10: UI Enhancements - Weighted Metrics
+- Added "Avg Timing" column (weighted mean absolute error)
+- Added "Tendency" column (percentage early/late or centered)
+- Added "Consistency" column (weighted std dev with ratings)
+- All metrics weighted by hit count
+- Color-coded ratings for visual clarity
+
+### Phase 11: Groove-Aware Analysis Implementation
+**Problem**: Grid-based analysis showed constant ~30ms offset for musically tight performances because it measures absolute deviation from grid, not consistency.
+
+**Solution**: Implemented new analysis mode that measures timing consistency relative to the player's established groove.
+
+**Implementation**:
+- New function: `calculate_groove_aware_quality()` in `drum_analyzer.py`
+- Detects natural groove offset using 8-16 stable hits from middle of performance
+- Uses median for outlier resistance (skips first/last 10% of song)
+- Measures consistency with IQR (interquartile range)
+- Priority drums for reference: Bass Drum 1 > Acoustic Snare > Closed Hi-Hat
+
+**UI Integration**:
+- Two-button toggle in web UI (🎵 Groove-Aware / 📏 Grid-Based)
+- Global `ANALYSIS_MODE` in backend
+- Endpoint: `POST /config/analysis-mode`
+- Re-analyzes all files when mode changes
+
+**Test Results** (jh3-DanaGlover-70pbm.mid):
+- Grid-based: 26-29ms error → scores 50-58 (Acceptable)
+- Groove-aware: 34.9ms groove offset detected, 33ms IQR → scores 43-47 (Fair)
+- Lower groove-aware scores correctly identify timing inconsistency (±33ms variation)
+
+**Documentation Created**:
+- `GROOVE_AWARE_ANALYSIS.md`: Full technical documentation
+- `test_groove_aware.py`: Comparison test script
+
 ---
 
 ## Scripts and Their Purposes
