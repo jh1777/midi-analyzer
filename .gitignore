@@ -57,3 +57,7 @@ web-ui/.vite/
 *.midi
 **/*.mid
 **/*.midi
+
+# MP3
+*.mp3
+**/*.mp3

@@ -123,12 +123,45 @@ def analyze_file(file_path: str):
                 "grid_name": metrics['grid_name']
             })
         
+        # Calculate weighted average timing error
+        # Weight each drum's error by its hit count
+        total_error_weighted = sum(
+            metrics['abs_mean_error_ms'] * metrics['hit_count']
+            for _, metrics in timing_quality.items()
+        )
+        total_hits = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+        avg_timing_ms = round(total_error_weighted / total_hits, 1) if total_hits > 0 else 0
+        
+        # Calculate timing tendency (early vs late)
+        # Count percentage of hits that are early (negative error) vs late (positive error)
+        total_weighted_error = sum(
+            metrics['mean_error_ms'] * metrics['hit_count']
+            for _, metrics in timing_quality.items()
+        )
+        avg_signed_error = total_weighted_error / total_hits if total_hits > 0 else 0
+        
+        # Determine tendency and calculate percentage
+        # We'll estimate the percentage based on mean error magnitude
+        # If mean error is positive (late), calculate how "late" the overall tendency is
+        if avg_signed_error > 2:  # Threshold for "rushing"
+            # Calculate rough percentage - scale based on typical error ranges
+            # Assuming most hits are within ±50ms, we normalize to 0-100%
+            percentage = min(100, abs(avg_signed_error) / 50 * 100)
+            timing_tendency = f"{round(percentage)}% Late"
+        elif avg_signed_error < -2:  # Threshold for "dragging"
+            percentage = min(100, abs(avg_signed_error) / 50 * 100)
+            timing_tendency = f"{round(percentage)}% Early"
+        else:
+            timing_tendency = "Centered"
+        
         return {
             "filename": Path(file_path).name,
             "path": file_path,
             "duration": analysis['duration_seconds'],
             "tempo": analysis['tempo_bpm'],
             "total_hits": analysis['total_beats'],
+            "avg_timing_ms": avg_timing_ms,
+            "timing_tendency": timing_tendency,
             "top_drums": top_drums
         }
         
@@ -170,12 +203,38 @@ def analyze_all_files():
                     "grid_name": metrics['grid_name']
                 })
             
+            # Calculate weighted average timing error
+            total_error_weighted = sum(
+                metrics['abs_mean_error_ms'] * metrics['hit_count']
+                for _, metrics in timing_quality.items()
+            )
+            total_hits_calc = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+            avg_timing_ms = round(total_error_weighted / total_hits_calc, 1) if total_hits_calc > 0 else 0
+            
+            # Calculate timing tendency
+            total_weighted_error = sum(
+                metrics['mean_error_ms'] * metrics['hit_count']
+                for _, metrics in timing_quality.items()
+            )
+            avg_signed_error = total_weighted_error / total_hits_calc if total_hits_calc > 0 else 0
+            
+            if avg_signed_error > 2:
+                percentage = min(100, abs(avg_signed_error) / 50 * 100)
+                timing_tendency = f"{round(percentage)}% Late"
+            elif avg_signed_error < -2:
+                percentage = min(100, abs(avg_signed_error) / 50 * 100)
+                timing_tendency = f"{round(percentage)}% Early"
+            else:
+                timing_tendency = "Centered"
+            
             results.append({
                 "filename": file_path.name,
                 "path": relative_path,
                 "duration": analysis['duration_seconds'],
                 "tempo": analysis['tempo_bpm'],
                 "total_hits": analysis['total_beats'],
+                "avg_timing_ms": avg_timing_ms,
+                "timing_tendency": timing_tendency,
                 "top_drums": top_drums,
                 "error": None
             })
@@ -187,6 +246,8 @@ def analyze_all_files():
                 "duration": 0,
                 "tempo": 0,
                 "total_hits": 0,
+                "avg_timing_ms": 0,
+                "timing_tendency": "-",
                 "top_drums": [],
                 "error": str(e)
             })
