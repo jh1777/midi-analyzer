@@ -25,6 +25,7 @@ interface FileAnalysis {
   duration: number
   tempo: number
   total_hits: number
+  avg_timing_ms: number
   top_drums: DrumMetric[]
   error?: string
 }
@@ -172,6 +173,13 @@ function App() {
     if (sortColumn === 'total_hits') {
       return [...files].sort((a, b) => {
         const diff = a.total_hits - b.total_hits
+        return sortDirection === 'asc' ? diff : -diff
+      })
+    }
+
+    if (sortColumn === 'avg_timing') {
+      return [...files].sort((a, b) => {
+        const diff = a.avg_timing_ms - b.avg_timing_ms
         return sortDirection === 'asc' ? diff : -diff
       })
     }
@@ -328,6 +336,24 @@ function App() {
                       )}
                     </button>
                   </TableHead>
+                  <TableHead className="text-center">
+                    <button
+                      onClick={() => handleSort('avg_timing')}
+                      className="flex items-center justify-center gap-1 hover:text-gray-900 transition-colors mx-auto"
+                      title="Weighted average timing error across all drums"
+                    >
+                      <span>Avg Timing</span>
+                      {sortColumn === 'avg_timing' ? (
+                        sortDirection === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
                   {DRUM_COLUMNS.map((drumCol) => (
                     <TableHead key={drumCol.display}>
                       <button
@@ -367,6 +393,19 @@ function App() {
                       {file.tempo > 0 ? `${Math.round(file.tempo)} BPM` : '-'}
                     </TableCell>
                     <TableCell className="text-center">{file.total_hits || '-'}</TableCell>
+                    <TableCell className="text-center">
+                      {file.avg_timing_ms > 0 ? (
+                        <span className={`font-semibold ${
+                          file.avg_timing_ms < 10 ? 'text-green-600' :
+                          file.avg_timing_ms < 20 ? 'text-blue-600' :
+                          file.avg_timing_ms < 35 ? 'text-yellow-600' :
+                          file.avg_timing_ms < 50 ? 'text-orange-600' :
+                          'text-red-600'
+                        }`}>
+                          {file.avg_timing_ms}ms
+                        </span>
+                      ) : '-'}
+                    </TableCell>
                     {DRUM_COLUMNS.map((drumCol) => {
                       const drum = getDrumData(file, drumCol)
                       return (

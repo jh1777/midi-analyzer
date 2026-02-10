@@ -123,12 +123,22 @@ def analyze_file(file_path: str):
                 "grid_name": metrics['grid_name']
             })
         
+        # Calculate weighted average timing error
+        # Weight each drum's error by its hit count
+        total_error_weighted = sum(
+            metrics['abs_mean_error_ms'] * metrics['hit_count']
+            for _, metrics in timing_quality.items()
+        )
+        total_hits = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+        avg_timing_ms = round(total_error_weighted / total_hits, 1) if total_hits > 0 else 0
+        
         return {
             "filename": Path(file_path).name,
             "path": file_path,
             "duration": analysis['duration_seconds'],
             "tempo": analysis['tempo_bpm'],
             "total_hits": analysis['total_beats'],
+            "avg_timing_ms": avg_timing_ms,
             "top_drums": top_drums
         }
         
@@ -170,12 +180,21 @@ def analyze_all_files():
                     "grid_name": metrics['grid_name']
                 })
             
+            # Calculate weighted average timing error
+            total_error_weighted = sum(
+                metrics['abs_mean_error_ms'] * metrics['hit_count']
+                for _, metrics in timing_quality.items()
+            )
+            total_hits_calc = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+            avg_timing_ms = round(total_error_weighted / total_hits_calc, 1) if total_hits_calc > 0 else 0
+            
             results.append({
                 "filename": file_path.name,
                 "path": relative_path,
                 "duration": analysis['duration_seconds'],
                 "tempo": analysis['tempo_bpm'],
                 "total_hits": analysis['total_beats'],
+                "avg_timing_ms": avg_timing_ms,
                 "top_drums": top_drums,
                 "error": None
             })
@@ -187,6 +206,7 @@ def analyze_all_files():
                 "duration": 0,
                 "tempo": 0,
                 "total_hits": 0,
+                "avg_timing_ms": 0,
                 "top_drums": [],
                 "error": str(e)
             })
