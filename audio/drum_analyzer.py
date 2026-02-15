@@ -197,7 +197,244 @@ class DrumAnalyzer:
         
         return quality_metrics
     
-    def analyze(self) -> Dict:
+    def calculate_groove_aware_quality(self, beats: List[Dict]) -> Dict:
+        """Calculate timing consistency relative to player's established groove.
+        
+        This method:
+        1. Detects the player's natural timing offset (groove) from a stable window
+        2. Subtracts this groove offset from all hits
+        3. Measures consistency relative to the groove (not absolute grid)
+        
+        This eliminates constant offsets (e.g. ~30ms) caused by:
+        - E-drum latency
+        - Player's natural "laid back" or "pushed" feel
+        - DAW recording offset
+        
+        Args:
+            beats: List of beat dictionaries with 'beat_position' and 'time_seconds'
+            
+        Returns:
+            Dictionary with groove-aware timing metrics per drum type
+        """
+        # Group beats by drum type
+        drum_beats = defaultdict(list)
+        for beat in beats:
+            drum_beats[beat['drum']].append({
+                'time_seconds': beat['time_seconds'],
+                'beat_position': beat['beat_position']
+            })
+        
+        # Step 1: Detect groove reference offset
+        groove_offset_ms, reference_drum = self._detect_groove_offset(drum_beats)
+        
+        # Step 2: Calculate consistency metrics per drum (groove-corrected)
+        quality_metrics = {}
+        
+        for drum, hits in drum_beats.items():
+            if len(hits) < 3:
+                continue
+            
+            # Find best grid size for this drum
+            grid_sizes = [1/8, 1/6, 0.25, 1/3, 0.5, 1.0]  # 32nd, 16th triplets, 16th, 8th triplets, 8th, quarter
+            best_grid_size = None
+            best_errors = None
+            best_score = float('inf')
+            
+            for grid_size in grid_sizes:
+                errors = self._calculate_grid_offsets(hits, grid_size)
+                total_error = np.sum(np.abs(errors))
+                
+                if total_error < best_score:
+                    best_score = total_error
+                    best_grid_size = grid_size
+                    best_errors = errors
+            
+            if best_errors is None or len(best_errors) == 0:
+                continue
+            
+            # SUBTRACT GROOVE OFFSET
+            groove_corrected = best_errors - groove_offset_ms
+            
+            # Calculate consistency metrics (using groove-corrected values)
+            mean_dev = np.mean(groove_corrected)
+            std_dev = np.std(groove_corrected)
+            
+            # Robust metrics (less sensitive to outliers)
+            q1, median, q3 = np.percentile(groove_corrected, [25, 50, 75])
+            iqr = q3 - q1
+            
+            # Outlier detection (Tukey's fences)
+            lower_fence = q1 - 1.5 * iqr
+            upper_fence = q3 + 1.5 * iqr
+            outliers = [x for x in groove_corrected if x < lower_fence or x > upper_fence]
+            outlier_pct = (len(outliers) / len(groove_corrected) * 100) if len(groove_corrected) > 0 else 0
+            
+            # Consistency score based on IQR (more robust than std dev)
+            # Tight: IQR < 10ms
+            # Good: IQR < 20ms  
+            # Fair: IQR < 35ms
+            # Loose: IQR >= 35ms
+            if iqr < 10:
+                consistency_score = 100 - iqr
+            elif iqr < 20:
+                consistency_score = 90 - (iqr - 10)
+            elif iqr < 35:
+                consistency_score = 70 - (iqr - 20) * 2
+            else:
+                consistency_score = max(0, 40 - (iqr - 35))
+            
+            # Determine tendency (relative to groove)
+            if mean_dev > 5:
+                tendency = 'Ahead of groove'
+            elif mean_dev < -5:
+                tendency = 'Behind groove'
+            else:
+                tendency = 'Locked to groove'
+            
+            # Grid name
+            grid_names = {
+                1/8: '32nd notes',
+                1/6: '16th triplets',
+                0.25: '16th notes',
+                1/3: '8th triplets',
+                0.5: '8th notes',
+                1.0: 'quarter notes'
+            }
+            grid_name = grid_names.get(best_grid_size, f'{best_grid_size:.4f} beats')
+            
+            quality_metrics[drum] = {
+                'hit_count': len(hits),
+                'grid_size': best_grid_size,
+                'grid_name': grid_name,
+                'groove_offset_ms': round(float(groove_offset_ms), 2),
+                'mean_error_ms': round(float(mean_dev), 2),  # Relative to groove
+                'abs_mean_error_ms': round(float(np.mean(np.abs(groove_corrected))), 2),
+                'std_dev_ms': round(float(std_dev), 2),
+                'iqr_ms': round(float(iqr), 2),
+                'median_offset_ms': round(float(median), 2),
+                'outlier_percentage': round(float(outlier_pct), 1),
+                'timing_score': round(float(consistency_score), 1),
+                'tendency': tendency,
+            }
+            
+            # Add rating based on consistency score
+            if consistency_score >= 90:
+                quality_metrics[drum]['rating'] = 'Tight'
+            elif consistency_score >= 70:
+                quality_metrics[drum]['rating'] = 'Good'
+            elif consistency_score >= 40:
+                quality_metrics[drum]['rating'] = 'Fair'
+            else:
+                quality_metrics[drum]['rating'] = 'Loose'
+        
+        # Add metadata about groove detection
+        quality_metrics['_groove_metadata'] = {
+            'groove_offset_ms': round(float(groove_offset_ms), 2),
+            'reference_drum': reference_drum,
+            'analysis_mode': 'groove-aware'
+        }
+        
+        return quality_metrics
+    
+    def _detect_groove_offset(self, drum_beats: Dict) -> Tuple[float, Optional[str]]:
+        """Detect player's groove offset from a stable window of hits.
+        
+        Returns:
+            (groove_offset_ms, reference_drum_name)
+        """
+        # Priority order for reference drums (most reliable first)
+        priority = ['Bass Drum 1', 'Acoustic Snare', 'Closed Hi-Hat', 'Acoustic Bass Drum']
+        
+        reference_drum = None
+        best_consistency = float('inf')
+        best_offsets = None
+        
+        for drum_name in priority:
+            if drum_name not in drum_beats:
+                continue
+            
+            hits = drum_beats[drum_name]
+            if len(hits) < 16:  # Need at least 16 hits
+                continue
+            
+            # Skip first/last 10% (intro/outro often unstable)
+            start_idx = max(1, len(hits) // 10)
+            end_idx = len(hits) - max(1, len(hits) // 10)
+            stable_hits = hits[start_idx:end_idx]
+            
+            if len(stable_hits) < 8:
+                continue
+            
+            # Find best grid size for this drum
+            grid_sizes = [0.25, 0.5, 1.0]  # 16th, 8th, quarter
+            best_grid = None
+            min_error = float('inf')
+            
+            for grid_size in grid_sizes:
+                offsets = self._calculate_grid_offsets(stable_hits, grid_size)
+                total_error = np.sum(np.abs(offsets))
+                if total_error < min_error:
+                    min_error = total_error
+                    best_grid = grid_size
+            
+            # Calculate offsets with best grid
+            offsets = self._calculate_grid_offsets(stable_hits, best_grid)
+            
+            # Check consistency using IQR
+            q1, q3 = np.percentile(offsets, [25, 75])
+            iqr = q3 - q1
+            
+            if iqr < best_consistency:
+                best_consistency = iqr
+                reference_drum = drum_name
+                best_offsets = offsets
+        
+        if best_offsets is None or len(best_offsets) == 0:
+            return 0.0, None  # Fallback: no groove offset
+        
+        # Take middle 8-16 hits for groove reference
+        n_reference = min(16, max(8, len(best_offsets) // 4))
+        middle_start = (len(best_offsets) - n_reference) // 2
+        groove_window = best_offsets[middle_start:middle_start + n_reference]
+        
+        # Use MEDIAN (robust to outliers)
+        groove_offset = np.median(groove_window)
+        
+        return groove_offset, reference_drum
+    
+    def _calculate_grid_offsets(self, hits: List[Dict], grid_size: float) -> np.ndarray:
+        """Calculate timing offsets from grid for a list of hits.
+        
+        Returns:
+            Array of offsets in milliseconds (negative = early, positive = late)
+        """
+        offsets_ms = []
+        
+        beat_duration_sec = mido.tick2second(
+            self.ticks_per_beat,
+            self.ticks_per_beat,
+            self.tempo
+        )
+        
+        for hit in hits:
+            beat_pos = hit['beat_position']
+            
+            # Position within grid
+            pos_in_grid = beat_pos % grid_size
+            
+            # Distance to nearest grid line
+            if pos_in_grid <= grid_size / 2:
+                error_beats = pos_in_grid  # Early
+            else:
+                error_beats = pos_in_grid - grid_size  # Late
+            
+            # Convert to ms
+            error_ms = error_beats * beat_duration_sec * 1000
+            offsets_ms.append(error_ms)
+        
+        return np.array(offsets_ms)
+    
+    def analyze(self, mode: str = 'groove-aware') -> Dict:
         """Analyze the MIDI file and return beat analysis data."""
         beats = []
         drum_counts = defaultdict(int)
@@ -261,8 +498,13 @@ class DrumAnalyzer:
         total_duration = tick_to_seconds(max_tick)
         bpm = mido.tempo2bpm(tempo_map[0][1])
         
-        # Calculate timing quality
-        timing_quality = self.calculate_timing_quality(beats)
+        # Calculate timing quality based on mode
+        if mode == 'groove-aware':
+            timing_quality = self.calculate_groove_aware_quality(beats)
+        elif mode == 'grid-based':
+            timing_quality = self.calculate_timing_quality(beats)
+        else:
+            raise ValueError(f"Unknown analysis mode: {mode}. Use 'groove-aware' or 'grid-based'")
         
         return {
             'file': self.midi_file,
@@ -272,7 +514,8 @@ class DrumAnalyzer:
             'total_beats': len(beats),
             'drum_counts': dict(drum_counts),
             'beats': beats,
-            'timing_quality': timing_quality
+            'timing_quality': timing_quality,
+            'analysis_mode': mode
         }
     
     def print_summary(self, analysis: Dict, filter_drum: str = None):
@@ -282,9 +525,13 @@ class DrumAnalyzer:
             analysis: Analysis data dictionary
             filter_drum: Optional drum name to filter output (e.g., "Acoustic Snare")
         """
+        mode = analysis.get('analysis_mode', 'grid-based')
+        mode_label = '🎵 Groove-Aware' if mode == 'groove-aware' else '📏 Grid-Based'
+        
         print(f"\n{'='*60}")
         print(f"MIDI Drum Analysis: {analysis['file']}")
         print(f"{'='*60}")
+        print(f"Analysis Mode: {mode_label}")
         print(f"Duration: {analysis['duration_seconds']}s")
         print(f"Tempo: {analysis['tempo_bpm']} BPM")
         
@@ -306,9 +553,14 @@ class DrumAnalyzer:
                 print(f"  {drum:<25} {count:>5} hits")
         
         # Print timing quality analysis
+        mode = analysis.get('analysis_mode', 'grid-based')
         print(f"\n{'TIMING QUALITY ANALYSIS':-^60}")
-        print(f"Measures timing deviation from tempo grid (quantization)")
-        print(f"Each hit compared to nearest beat position\n")
+        if mode == 'groove-aware':
+            print(f"Measures timing consistency relative to your natural groove")
+            print(f"Detects your groove offset, then measures consistency around it\n")
+        else:
+            print(f"Measures absolute timing deviation from tempo grid (quantization)")
+            print(f"Each hit compared to nearest beat position\n")
         
         timing_quality = analysis.get('timing_quality', {})
         
@@ -324,9 +576,12 @@ class DrumAnalyzer:
         
         print(f"\n{'Timing Perfection Scores (Higher is Better)':-^60}")
         
+        # Filter out metadata entries (start with _)
+        drum_quality = {k: v for k, v in timing_quality.items() if not k.startswith('_')}
+        
         # Sort by timing score (worst first to highlight areas needing work)
         sorted_quality = sorted(
-            timing_quality.items(),
+            drum_quality.items(),
             key=lambda x: x[1]['timing_score']
         )
         
@@ -401,29 +656,39 @@ class DrumAnalyzer:
         if len(beats_to_show) > 10:
             print(f"  ... and {len(beats_to_show) - 10} more beats")
         
+        mode = analysis.get('analysis_mode', 'grid-based')
         print(f"\n{'Legend:':-^60}")
         print(f"  Score   = Timing tightness (higher = closer to grid)")
-        print(f"  Error   = Average deviation from perfect timing (ms)")
+        if mode == 'groove-aware':
+            print(f"  Error   = IQR (consistency) in milliseconds")
+        else:
+            print(f"  Error   = Average deviation from perfect timing (ms)")
         print(f"  ✓       = Good timing (70+, <10ms avg error)")
         print(f"  ~       = Fair timing (40-69, 10-20ms avg error)")
         print(f"  ✗       = Needs work (<40, >20ms avg error)")
-        print(f"\nNote: Each hit is quantized to nearest grid position (16th/8th/quarter)")
-        print(f"      and deviation measured. Positive = late, negative = early.")
+        if mode == 'groove-aware':
+            print(f"\nNote: Groove-aware mode detects your natural groove offset,")
+            print(f"      then measures consistency (IQR) around that groove.")
+            print(f"      Lower IQR = tighter, more consistent timing.")
+        else:
+            print(f"\nNote: Each hit is quantized to nearest grid position (16th/8th/quarter)")
+            print(f"      and deviation measured. Positive = late, negative = early.")
         print(f"{'='*60}\n")
 
 
-def analyze_midi_drums(midi_file: str, filter_drum: str = None) -> Dict:
+def analyze_midi_drums(midi_file: str, filter_drum: str = None, mode: str = 'groove-aware') -> Dict:
     """Analyze a MIDI drum file and return beat analysis data.
     
     Args:
         midi_file: Path to the MIDI file
         filter_drum: Optional drum name to filter output (e.g., "Acoustic Snare")
+        mode: Analysis mode - 'groove-aware' (default) or 'grid-based'
         
     Returns:
         Dictionary containing beat analysis data
     """
     analyzer = DrumAnalyzer(midi_file)
-    analysis = analyzer.analyze()
+    analysis = analyzer.analyze(mode=mode)
     analyzer.print_summary(analysis, filter_drum=filter_drum)
     return analysis
 

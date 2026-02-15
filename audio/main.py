@@ -13,8 +13,9 @@ def main():
         epilog='''
 Examples:
   python -m audio drums.mid
+  python -m audio drums.mid --mode groove-aware
   python -m audio drums.mid --details "Acoustic Snare"
-  python -m audio drums.mid --details "Bass Drum 1"
+  python -m audio drums.mid --details "Bass Drum 1" --mode grid-based
         ''')
     
     parser.add_argument('midi_file', help='Path to MIDI file')
@@ -22,10 +23,15 @@ Examples:
         '--details', 
         metavar='DRUM_NAME',
         help='Show detailed analysis for a specific drum (e.g., "Acoustic Snare", "Bass Drum 1")')
+    parser.add_argument(
+        '--mode',
+        choices=['grid-based', 'groove-aware'],
+        default='grid-based',
+        help='Analysis mode: grid-based (absolute timing) or groove-aware (consistency) [default: grid-based]')
     
     args = parser.parse_args()
     
-    analyze_midi_drums(args.midi_file, filter_drum=args.details)
+    analyze_midi_drums(args.midi_file, filter_drum=args.details, mode=args.mode)
 
 
 if __name__ == "__main__":

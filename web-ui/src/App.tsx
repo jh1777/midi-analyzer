@@ -27,6 +27,8 @@ interface FileAnalysis {
   total_hits: number
   avg_timing_ms: number
   timing_tendency: string
+  consistency_ms: number
+  consistency_rating: string
   top_drums: DrumMetric[]
   error?: string
 }
@@ -52,6 +54,7 @@ function App() {
   const [newFolder, setNewFolder] = useState('')
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
+  const [analysisMode, setAnalysisMode] = useState<'groove-aware' | 'grid-based'>('groove-aware')
 
   const formatDuration = (seconds: number): string => {
     if (seconds <= 0) return '-'
@@ -71,6 +74,7 @@ function App() {
       const data = await response.json()
       setMidiFolder(data.midi_folder)
       setNewFolder(data.midi_folder)
+      setAnalysisMode(data.analysis_mode || 'groove-aware')
     } catch (error) {
       console.error('Failed to fetch config:', error)
     }
@@ -96,6 +100,28 @@ function App() {
     } catch (error) {
       console.error('Failed to update config:', error)
       alert(error instanceof Error ? error.message : 'Failed to update folder path')
+    }
+  }
+
+  const updateAnalysisMode = async (mode: 'groove-aware' | 'grid-based') => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/config/analysis-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update analysis mode')
+      }
+      
+      setAnalysisMode(mode)
+      // Re-analyze all files with new mode
+      analyzeFiles()
+    } catch (error) {
+      console.error('Failed to update analysis mode:', error)
+      alert(error instanceof Error ? error.message : 'Failed to update analysis mode')
     }
   }
 
@@ -181,6 +207,13 @@ function App() {
     if (sortColumn === 'avg_timing') {
       return [...files].sort((a, b) => {
         const diff = a.avg_timing_ms - b.avg_timing_ms
+        return sortDirection === 'asc' ? diff : -diff
+      })
+    }
+
+    if (sortColumn === 'consistency') {
+      return [...files].sort((a, b) => {
+        const diff = a.consistency_ms - b.consistency_ms
         return sortDirection === 'asc' ? diff : -diff
       })
     }
@@ -276,7 +309,49 @@ function App() {
             </div>
           </div>
 
-          <div className="flex justify-end">
+          {/* Analysis Mode Toggle */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Analysis Mode
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => updateAnalysisMode('groove-aware')}
+                disabled={loading}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                  analysisMode === 'groove-aware'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className="font-semibold mb-1">🎵 Groove-Aware</div>
+                <div className="text-xs">
+                  Measures consistency relative to your groove
+                </div>
+              </button>
+              <button
+                onClick={() => updateAnalysisMode('grid-based')}
+                disabled={loading}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                  analysisMode === 'grid-based'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className="font-semibold mb-1">📏 Grid-Based</div>
+                <div className="text-xs">
+                  Measures absolute distance from DAW grid
+                </div>
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              {analysisMode === 'groove-aware'
+                ? '✅ Eliminates constant offsets (e-drum latency, laid-back feel). Focuses on timing consistency.'
+                : '📐 Traditional analysis. Penalizes any offset from the grid.'}
+            </p>
+          </div>
+
+          <div className="flex justify-end mt-6">
             <Button
               onClick={analyzeFiles}
               disabled={loading}
@@ -360,6 +435,24 @@ function App() {
                       Tendency
                     </span>
                   </TableHead>
+                  <TableHead className="text-center">
+                    <button
+                      onClick={() => handleSort('consistency')}
+                      className="flex items-center justify-center gap-1 hover:text-gray-900 transition-colors mx-auto"
+                      title="Timing consistency (standard deviation) - lower is tighter"
+                    >
+                      <span>Consistency</span>
+                      {sortColumn === 'consistency' ? (
+                        sortDirection === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
                   {DRUM_COLUMNS.map((drumCol) => (
                     <TableHead key={drumCol.display}>
                       <button
@@ -421,6 +514,23 @@ function App() {
                         }`}>
                           {file.timing_tendency}
                         </span>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {file.consistency_ms > 0 ? (
+                        <div className="flex flex-col">
+                          <span className={`text-sm font-semibold ${
+                            file.consistency_rating === 'Tight' ? 'text-green-600' :
+                            file.consistency_rating === 'Good' ? 'text-blue-600' :
+                            file.consistency_rating === 'Fair' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {file.consistency_rating}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            ±{file.consistency_ms}ms
+                          </span>
+                        </div>
                       ) : '-'}
                     </TableCell>
                     {DRUM_COLUMNS.map((drumCol) => {

@@ -22,10 +22,14 @@ app.add_middleware(
 
 # Configuration
 MIDI_FOLDER = Path(__file__).parent / "mid-files"
+ANALYSIS_MODE = "groove-aware"  # Default mode
 
 
 class ConfigModel(BaseModel):
     midi_folder: str
+
+class AnalysisModeModel(BaseModel):
+    mode: str
 
 
 class FileAnalysis(BaseModel):
@@ -47,7 +51,10 @@ def read_root():
 @app.get("/config")
 def get_config():
     """Get current configuration."""
-    return {"midi_folder": str(MIDI_FOLDER)}
+    return {
+        "midi_folder": str(MIDI_FOLDER),
+        "analysis_mode": ANALYSIS_MODE
+    }
 
 
 @app.post("/config")
@@ -71,6 +78,23 @@ def update_config(config: ConfigModel):
     
     MIDI_FOLDER = new_path
     return {"midi_folder": str(MIDI_FOLDER)}
+
+@app.post("/config/analysis-mode")
+def update_analysis_mode(mode_config: AnalysisModeModel):
+    """Update analysis mode."""
+    global ANALYSIS_MODE
+    
+    if mode_config.mode not in ['groove-aware', 'grid-based']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid mode: {mode_config.mode}. Must be 'groove-aware' or 'grid-based'"
+        )
+    
+    ANALYSIS_MODE = mode_config.mode
+    return {
+        "analysis_mode": ANALYSIS_MODE,
+        "message": f"Analysis mode updated to {ANALYSIS_MODE}"
+    }
 
 
 @app.get("/files")
@@ -100,14 +124,16 @@ def analyze_file(file_path: str):
     
     try:
         analyzer = DrumAnalyzer(str(full_path))
-        analysis = analyzer.analyze()
+        analysis = analyzer.analyze(mode=ANALYSIS_MODE)
         
         # Return all drums (frontend will filter to specific columns)
+        # Filter out metadata entries (start with _)
         timing_quality = analysis.get('timing_quality', {})
+        drum_quality = {k: v for k, v in timing_quality.items() if not k.startswith('_')}
         
         # Sort by hit count (most played drums first)
         sorted_drums = sorted(
-            timing_quality.items(),
+            drum_quality.items(),
             key=lambda x: x[1]['hit_count'],
             reverse=True
         )
@@ -127,16 +153,16 @@ def analyze_file(file_path: str):
         # Weight each drum's error by its hit count
         total_error_weighted = sum(
             metrics['abs_mean_error_ms'] * metrics['hit_count']
-            for _, metrics in timing_quality.items()
+            for _, metrics in drum_quality.items()
         )
-        total_hits = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+        total_hits = sum(metrics['hit_count'] for _, metrics in drum_quality.items())
         avg_timing_ms = round(total_error_weighted / total_hits, 1) if total_hits > 0 else 0
         
         # Calculate timing tendency (early vs late)
         # Count percentage of hits that are early (negative error) vs late (positive error)
         total_weighted_error = sum(
             metrics['mean_error_ms'] * metrics['hit_count']
-            for _, metrics in timing_quality.items()
+            for _, metrics in drum_quality.items()
         )
         avg_signed_error = total_weighted_error / total_hits if total_hits > 0 else 0
         
@@ -154,6 +180,27 @@ def analyze_file(file_path: str):
         else:
             timing_tendency = "Centered"
         
+        # Calculate timing consistency (weighted standard deviation)
+        # This shows how much timing varies (tightness)
+        total_variance_weighted = sum(
+            metrics['std_dev_ms'] ** 2 * metrics['hit_count']
+            for _, metrics in drum_quality.items()
+        )
+        weighted_std_dev = (total_variance_weighted / total_hits) ** 0.5 if total_hits > 0 else 0
+        consistency_ms = round(weighted_std_dev, 1)
+        
+        # Determine consistency rating
+        # Standard deviation shows how "tight" the timing is
+        # Low std = consistent, High std = inconsistent
+        if consistency_ms < 10:
+            consistency_rating = "Tight"
+        elif consistency_ms < 20:
+            consistency_rating = "Good"
+        elif consistency_ms < 30:
+            consistency_rating = "Fair"
+        else:
+            consistency_rating = "Loose"
+        
         return {
             "filename": Path(file_path).name,
             "path": file_path,
@@ -162,6 +209,8 @@ def analyze_file(file_path: str):
             "total_hits": analysis['total_beats'],
             "avg_timing_ms": avg_timing_ms,
             "timing_tendency": timing_tendency,
+            "consistency_ms": consistency_ms,
+            "consistency_rating": consistency_rating,
             "top_drums": top_drums
         }
         
@@ -182,12 +231,14 @@ def analyze_all_files():
         relative_path = str(file_path.relative_to(MIDI_FOLDER))
         try:
             analyzer = DrumAnalyzer(str(file_path))
-            analysis = analyzer.analyze()
+            analysis = analyzer.analyze(mode=ANALYSIS_MODE)
             
             # Return all drums (frontend will filter to specific columns)
+            # Filter out metadata entries (start with _)
             timing_quality = analysis.get('timing_quality', {})
+            drum_quality = {k: v for k, v in timing_quality.items() if not k.startswith('_')}
             sorted_drums = sorted(
-                timing_quality.items(),
+                drum_quality.items(),
                 key=lambda x: x[1]['hit_count'],
                 reverse=True
             )
@@ -206,15 +257,15 @@ def analyze_all_files():
             # Calculate weighted average timing error
             total_error_weighted = sum(
                 metrics['abs_mean_error_ms'] * metrics['hit_count']
-                for _, metrics in timing_quality.items()
+                for _, metrics in drum_quality.items()
             )
-            total_hits_calc = sum(metrics['hit_count'] for _, metrics in timing_quality.items())
+            total_hits_calc = sum(metrics['hit_count'] for _, metrics in drum_quality.items())
             avg_timing_ms = round(total_error_weighted / total_hits_calc, 1) if total_hits_calc > 0 else 0
             
             # Calculate timing tendency
             total_weighted_error = sum(
                 metrics['mean_error_ms'] * metrics['hit_count']
-                for _, metrics in timing_quality.items()
+                for _, metrics in drum_quality.items()
             )
             avg_signed_error = total_weighted_error / total_hits_calc if total_hits_calc > 0 else 0
             
@@ -227,6 +278,23 @@ def analyze_all_files():
             else:
                 timing_tendency = "Centered"
             
+            # Calculate consistency
+            total_variance_weighted = sum(
+                metrics['std_dev_ms'] ** 2 * metrics['hit_count']
+                for _, metrics in drum_quality.items()
+            )
+            weighted_std_dev = (total_variance_weighted / total_hits_calc) ** 0.5 if total_hits_calc > 0 else 0
+            consistency_ms = round(weighted_std_dev, 1)
+            
+            if consistency_ms < 10:
+                consistency_rating = "Tight"
+            elif consistency_ms < 20:
+                consistency_rating = "Good"
+            elif consistency_ms < 30:
+                consistency_rating = "Fair"
+            else:
+                consistency_rating = "Loose"
+            
             results.append({
                 "filename": file_path.name,
                 "path": relative_path,
@@ -235,6 +303,8 @@ def analyze_all_files():
                 "total_hits": analysis['total_beats'],
                 "avg_timing_ms": avg_timing_ms,
                 "timing_tendency": timing_tendency,
+                "consistency_ms": consistency_ms,
+                "consistency_rating": consistency_rating,
                 "top_drums": top_drums,
                 "error": None
             })
@@ -248,6 +318,8 @@ def analyze_all_files():
                 "total_hits": 0,
                 "avg_timing_ms": 0,
                 "timing_tendency": "-",
+                "consistency_ms": 0,
+                "consistency_rating": "-",
                 "top_drums": [],
                 "error": str(e)
             })
